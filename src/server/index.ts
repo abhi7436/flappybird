@@ -9,6 +9,7 @@ import { config, allowedOrigins, isProd } from './config/env';
 import { connectRedis } from './database/redisClient';
 import { pool } from './database/connection';
 import { initializeWebSocketServer } from './WebSocketServer';
+import { type IRoomManager, InMemoryRoomManager } from './rooms';
 import {
   globalLimiter,
   authLimiter,
@@ -17,6 +18,8 @@ import {
 } from './middleware/rateLimiter';
 
 // Routes
+// NOTE: authRoutes is only mounted when ENABLE_AUTH=true.
+//       All other routes stay active in V1 (auth passthrough via requireAuth).
 import authRoutes         from './routes/authRoutes';
 import profileRoutes      from './routes/profileRoutes';
 import friendRoutes       from './routes/friendRoutes';
@@ -85,7 +88,11 @@ async function bootstrap(): Promise<void> {
   app.use(globalLimiter);
 
   // ── REST routes ─────────────────────────────────────────
-  app.use('/api/auth',           authLimiter, authRoutes);
+  // Auth routes are only active when ENABLE_AUTH=true.
+  // Set ENABLE_AUTH=true in .env to re-enable registration/login endpoints.
+  if (config.ENABLE_AUTH) {
+    app.use('/api/auth', authLimiter, authRoutes);
+  }
   app.use('/api/profile',        profileRoutes);
   app.use('/api/friends',        friendRoutes);
   app.use('/api/invites',        inviteRoutes);
@@ -113,7 +120,15 @@ async function bootstrap(): Promise<void> {
 
   // ── HTTP + WebSocket server ─────────────────────────────
   const httpServer = http.createServer(app);
-  await initializeWebSocketServer(httpServer);
+
+  // ── Room manager injection (swap class here to scale) ───────
+  // InMemoryRoomManager: single Node.js instance, in-process Map.
+  // RedisRoomManager:    multiple replicas sharing state via Redis.
+  //                      → import { RedisRoomManager } from './rooms';
+  //                      → const roomManager: IRoomManager = new RedisRoomManager(redisClient);
+  const roomManager: IRoomManager = new InMemoryRoomManager();
+
+  await initializeWebSocketServer(httpServer, roomManager);
 
   httpServer.listen(config.PORT, () => {
     console.log(`[Server] Listening on http://localhost:${config.PORT}`);

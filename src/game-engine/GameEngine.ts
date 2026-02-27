@@ -257,7 +257,10 @@ export class GameEngine {
 
     if (rightEdge < this.config.canvasWidth - PIPE_SPAWN_DISTANCE) {
       const margin  = 60;
-      const maxGapY = this.config.canvasHeight - diff.gapHeight - margin;
+      // Use 0.88 of canvasHeight as the effective floor so the bottom pipe
+      // always has visible body above the ground strip (GROUND_FRAC = 0.88).
+      const groundY = this.config.canvasHeight * 0.88;
+      const maxGapY = groundY - diff.gapHeight - margin;
       const baseGapY = this.rand() * (maxGapY - margin) + margin;
       // Random vertical variance grows with tier (0 at tier 0)
       const variance = diff.verticalVariance > 0

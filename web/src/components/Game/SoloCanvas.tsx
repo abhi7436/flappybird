@@ -36,7 +36,7 @@ const DIFFICULTY_LABELS = ['Normal', 'Hard', 'Harder', 'Insane', 'MAXIMUM'];
 
 export const SoloCanvas: React.FC<Props> = ({ width, height, onBackToMenu }) => {
   const canvasRef   = useRef<HTMLCanvasElement>(null);
-  const bgRef        = useRef<{ stars: Star[]; clouds: Cloud[] } | null>(null);
+  const bgRef        = useRef<ReturnType<typeof initBackground> | null>(null);
   const lastTsRef    = useRef<number>(0);
   const birdAnimRef  = useRef<BirdAnimState>(BirdRenderer.createState());
   const scoreRef     = useRef(0);
@@ -120,7 +120,7 @@ export const SoloCanvas: React.FC<Props> = ({ width, height, onBackToMenu }) => 
       lastTsRef.current = ts;
 
       if (status === 'playing') {
-        updateBackground(bg.clouds, width, deltaMs);
+        updateBackground(bg.clouds, bg.grass, width, deltaMs);
       }
 
       // Update bird animation state each frame
@@ -131,7 +131,7 @@ export const SoloCanvas: React.FC<Props> = ({ width, height, onBackToMenu }) => 
       scoreRef.current = score;
       BirdRenderer.update(birdAnimRef.current, ts, velocity, scoreRef.current, nearCol, status === 'dead');
 
-      drawBackground(ctx, width, height, colors, bg.stars, bg.clouds, ts);
+      drawBackground(ctx, width, height, colors, bg.stars, bg.clouds, bg.grass, bg.rocks, ts);
 
       if (gameState) {
         for (const pipe of gameState.pipes) {

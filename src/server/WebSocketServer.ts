@@ -2,7 +2,7 @@ import http from 'http';
 import { Server, Socket } from 'socket.io';
 import { createClient } from 'redis';
 import { createAdapter } from '@socket.io/redis-adapter';
-import { RoomManager } from './RoomManager';
+import type { IRoomManager } from './rooms';
 import { AntiCheatService } from './services/AntiCheatService';
 import { LeaderboardService } from './services/LeaderboardService';
 import { RoomService } from './services/RoomService';
@@ -15,8 +15,6 @@ import { verifyToken } from './middleware/authMiddleware';
 import { LeaderboardEntry, LeaderboardUpdate, PlayerState } from './types';
 import { config, allowedOrigins } from './config/env';
 import type { ReplayData } from '../game-engine/ReplayRecorder';
-
-const roomManager = new RoomManager();
 
 // ── Socket-to-room tracking (for cleanup on disconnect) ───────
 const socketRoomMap = new Map<string, { roomId: string; userId: string }>();
@@ -39,6 +37,7 @@ const pendingBroadcasts = new Map<string, ReturnType<typeof setTimeout>>();
  */
 function scheduleBroadcast(
   io: Server,
+  roomManager: IRoomManager,
   roomId: string,
   isFinal = false
 ): void {
@@ -75,8 +74,22 @@ function scheduleBroadcast(
   pendingBroadcasts.set(roomId, timer);
 }
 
+/**
+ * Initialise the Socket.IO layer with a fully constructed room manager.
+ *
+ * Accepting `IRoomManager` rather than constructing `RoomManager` here
+ * keeps this module free of infrastructure decisions.  Swap the concrete
+ * class at the call-site in `server/index.ts` with zero handler changes:
+ *
+ *   // Single-instance
+ *   initializeWebSocketServer(server, new InMemoryRoomManager());
+ *
+ *   // Multi-instance (Redis-backed)
+ *   initializeWebSocketServer(server, new RedisRoomManager(redisClient));
+ */
 export async function initializeWebSocketServer(
-  httpServer: http.Server
+  httpServer: http.Server,
+  roomManager: IRoomManager,
 ): Promise<{ io: Server }> {
   const io = new Server(httpServer, {
     cors: {
@@ -139,7 +152,10 @@ export async function initializeWebSocketServer(
     const user = (socket as any).user as { userId: string; username: string };
     console.log(`[WS] Connected: ${socket.id} (${user.username})`);
 
-    UserRepository.setOnlineStatus(user.userId, true).catch(() => {});
+    // Track online status only when accounts are active
+    if (config.ENABLE_AUTH) {
+      UserRepository.setOnlineStatus(user.userId, true).catch(() => {});
+    }
 
     // ── join_room ────────────────────────────────────────
     socket.on(
@@ -231,13 +247,13 @@ export async function initializeWebSocketServer(
           username: user.username,
         });
 
-        scheduleBroadcast(io, roomId);
+        scheduleBroadcast(io, roomManager, roomId);
       }
     );
 
     // ── leave_room ───────────────────────────────────────
     socket.on('leave_room', async ({ roomId }: { roomId: string }) => {
-      await handleLeave(socket, io, roomId, user.userId);
+      await handleLeave(socket, io, roomManager, roomId, user.userId);
     });
 
     // ── score_update ─────────────────────────────────────
@@ -269,7 +285,7 @@ export async function initializeWebSocketServer(
         if (!updated) return;
 
         await roomManager.syncToRedis(roomId, updated);
-        scheduleBroadcast(io, roomId);
+        scheduleBroadcast(io, roomManager, roomId);
       }
     );
 
@@ -292,38 +308,46 @@ export async function initializeWebSocketServer(
         const rank = leaderboard.findIndex((e) => e.userId === user.userId) + 1;
         const totalPlayers = leaderboard.length;
 
-        // Fetch ELO before update
-        const { elo_rating: eloBefore } = await UserRepository
-          .findById(user.userId)
-          .then((u) => u ?? { elo_rating: 1000 });
+        // Account-layer persistence: only runs when ENABLE_AUTH=true.
+        // All the code is preserved — flip the flag in .env to re-enable.
+        if (config.ENABLE_AUTH) {
+          const { elo_rating: eloBefore } = await UserRepository
+            .findById(user.userId)
+            .then((u) => u ?? { elo_rating: 1000 });
 
-        // Persist game history + high-score update in parallel
-        await Promise.all([
-          GameHistoryRepository.save(user.userId, roomId, finalScore, rank),
-          UserRepository.updateHighScore(user.userId, finalScore),
-          roomManager.syncToRedis(roomId, player),
-        ]);
+          await Promise.all([
+            GameHistoryRepository.save(user.userId, roomId, finalScore, rank),
+            UserRepository.updateHighScore(user.userId, finalScore),
+            roomManager.syncToRedis(roomId, player),
+          ]);
 
-        // Save replay if client submitted one
-        if (replayData) {
-          ReplayRepository.save({
-            roomId,
-            userId: user.userId,
-            finalRank: rank || null,
-            replay: replayData,
-          }).catch((e) => console.error('[WS] Replay save error', e));
+          if (replayData) {
+            ReplayRepository.save({
+              roomId,
+              userId: user.userId,
+              finalRank: rank || null,
+              replay: replayData,
+            }).catch((e) => console.error('[WS] Replay save error', e));
+          }
+
+          pendingReplays.set(user.userId, replayData ?? ({} as ReplayData));
+
+          socket.emit('final_ranking', {
+            rank:         rank === 0 ? totalPlayers : rank,
+            totalPlayers,
+            finalScore,
+            eloBefore,
+          });
+        } else {
+          // V1: just sync score to Redis leaderboard, no DB persistence
+          await roomManager.syncToRedis(roomId, player);
+
+          socket.emit('final_ranking', {
+            rank:         rank === 0 ? totalPlayers : rank,
+            totalPlayers,
+            finalScore,
+          });
         }
-
-        // Store for batch ELO processing when all players are done
-        pendingReplays.set(user.userId, replayData ?? ({} as ReplayData));
-
-        // Tell this player their personal final rank
-        socket.emit('final_ranking', {
-          rank:         rank === 0 ? totalPlayers : rank,
-          totalPlayers,
-          finalScore,
-          eloBefore,
-        });
 
         // Broadcast to spectators
         io.to(`spectate:${roomId}`).emit('player_dead', {
@@ -335,26 +359,26 @@ export async function initializeWebSocketServer(
 
         const { total, dead } = roomManager.getDeadStats(roomId);
         const allDead = total > 0 && dead >= total;
-        scheduleBroadcast(io, roomId, allDead);
+        scheduleBroadcast(io, roomManager, roomId, allDead);
 
         if (allDead) {
-          // Process ELO for full room
-          const finalBoard = await roomManager.getLeaderboard(roomId);
-          const eloResults = await EloService.processGameResults(
-            finalBoard.map((e) => ({
-              userId: e.userId,
-              score:  e.score,
-              rank:   e.rank,
-              total:  finalBoard.length,
-            }))
-          );
-          // Broadcast ELO changes
-          for (const r of eloResults) {
-            io.to(roomId).emit('elo_update', r);
-            // Check if any new skins were unlocked
-            const unlocked = await SkinRepository.checkEloUnlocks(r.userId, r.newElo);
-            if (unlocked.length > 0) {
-              io.to(roomId).emit('skins_unlocked', { userId: r.userId, skinIds: unlocked });
+          // ELO processing: only when accounts are enabled
+          if (config.ENABLE_AUTH) {
+            const finalBoard = await roomManager.getLeaderboard(roomId);
+            const eloResults = await EloService.processGameResults(
+              finalBoard.map((e) => ({
+                userId: e.userId,
+                score:  e.score,
+                rank:   e.rank,
+                total:  finalBoard.length,
+              }))
+            );
+            for (const r of eloResults) {
+              io.to(roomId).emit('elo_update', r);
+              const unlocked = await SkinRepository.checkEloUnlocks(r.userId, r.newElo);
+              if (unlocked.length > 0) {
+                io.to(roomId).emit('skins_unlocked', { userId: r.userId, skinIds: unlocked });
+              }
             }
           }
         }
@@ -448,7 +472,7 @@ export async function initializeWebSocketServer(
       console.log(`[WS] Disconnected: ${socket.id} (${user.username})`);
       const info = socketRoomMap.get(socket.id);
       if (info) {
-        await handleLeave(socket, io, info.roomId, info.userId);
+        await handleLeave(socket, io, roomManager, info.roomId, info.userId);
       }
       // Clean spectator state
       const specRoomId = spectatorRoomMap.get(socket.id);
@@ -456,7 +480,10 @@ export async function initializeWebSocketServer(
         spectatorRoomMap.delete(socket.id);
         socket.leave(`spectate:${specRoomId}`);
       }
-      await UserRepository.setOnlineStatus(user.userId, false).catch(() => {});
+      // Mark offline only when accounts are active
+      if (config.ENABLE_AUTH) {
+        await UserRepository.setOnlineStatus(user.userId, false).catch(() => {});
+      }
     });
   });
 
@@ -466,6 +493,7 @@ export async function initializeWebSocketServer(
 async function handleLeave(
   socket: Socket,
   io: Server,
+  roomManager: IRoomManager,
   roomId: string,
   userId: string
 ): Promise<void> {
@@ -475,7 +503,7 @@ async function handleLeave(
   socketRoomMap.delete(socket.id);
 
   io.to(roomId).emit('player_left', { playerId: socket.id, userId });
-  scheduleBroadcast(io, roomId);
+  scheduleBroadcast(io, roomManager, roomId);
 
   // ── Host reassignment (lobby phase only) ─────────────────────
   // If the departing player was the host and the room is still in 'waiting'

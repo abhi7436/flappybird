@@ -21,7 +21,18 @@ const envSchema = z.object({
   // ── Redis ─────────────────────────────────────────────────
   REDIS_URL: z.string().url().default('redis://localhost:6379'),
 
-  // ── Authentication ────────────────────────────────────────
+  // ── Authentication ─────────────────────────────────────────
+  //
+  // ENABLE_AUTH=false  ← V1 default: skip JWT validation entirely.
+  //                       All sockets and REST routes accept any userId/username
+  //                       passed by the client with no verification.
+  //
+  // ENABLE_AUTH=true   ← Full auth: JWT on every WS handshake and REST request,
+  //                       account registration/login, ELO, game history, replays.
+  //                       Flip this to 'true' (or set via env) to re-enable.
+  //
+  ENABLE_AUTH: z.coerce.boolean().default(false),
+
   JWT_SECRET: z
     .string()
     .min(32, 'JWT_SECRET must be at least 32 characters')

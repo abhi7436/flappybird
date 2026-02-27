@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { RoomService } from '../services/RoomService';
 import { verifyToken } from './authMiddleware';
+import { config } from '../config/env';
 import { RoomJoinPayload } from '../types';
 
 /**
@@ -83,26 +84,31 @@ export function validateJoinToken(
  * requireRoomAuth
  * ───────────────
  * Combined: user must be authenticated AND room must be open.
+ *
+ * When ENABLE_AUTH=false the JWT check is skipped; only the room-open
+ * check runs.  Set ENABLE_AUTH=true to restore full auth enforcement.
  */
 export async function requireRoomAuth(
   req: Request,
   res: Response,
   next: NextFunction
 ): Promise<void> {
-  // 1. Check user JWT
+  // ── V1: auth disabled — skip token check, just verify room is open ───
+  if (!config.ENABLE_AUTH) {
+    await validateRoomOpen(req, res, next);
+    return;
+  }
+  // ── Full auth ─────────────────────────────────────────────
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith('Bearer ')) {
     res.status(401).json({ error: 'Authentication required' });
     return;
   }
-
   try {
     req.user = verifyToken(authHeader.slice(7));
   } catch {
     res.status(401).json({ error: 'Invalid or expired token' });
     return;
   }
-
-  // 2. Check room is open
   await validateRoomOpen(req, res, next);
 }

@@ -11,13 +11,19 @@
 import { useCallback } from 'react';
 import { useGameStore } from '../store/gameStore';
 
+// Mirrors the server-side ENABLE_AUTH flag.
+// Set VITE_ENABLE_AUTH=false (web/.env) to disable auth for V1.
+// Set VITE_ENABLE_AUTH=true to restore the full JWT gate.
+const ENABLE_AUTH = import.meta.env.VITE_ENABLE_AUTH !== 'false';
+
 export function useAuthGuard() {
-  const user         = useGameStore((s) => s.user);
+  const user          = useGameStore((s) => s.user);
   const openAuthModal = useGameStore((s) => s.openAuthModal);
 
   const requireAuth = useCallback(
     (fn: () => void) => {
-      if (user) {
+      // V1 passthrough: skip auth gate entirely when auth is disabled
+      if (!ENABLE_AUTH || user) {
         fn();
       } else {
         openAuthModal(fn);
@@ -26,5 +32,5 @@ export function useAuthGuard() {
     [user, openAuthModal]
   );
 
-  return { requireAuth, isAuthenticated: !!user };
+  return { requireAuth, isAuthenticated: !ENABLE_AUTH || !!user };
 }

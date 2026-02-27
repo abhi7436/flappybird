@@ -29,7 +29,7 @@ const GROUND_FRAC = 0.88; // fraction of height that is sky
 
 export const GameCanvas: React.FC<Props> = ({ width, height, socket, roomId }) => {
   const canvasRef   = useRef<HTMLCanvasElement>(null);
-  const bgRef        = useRef<{ stars: Star[]; clouds: Cloud[] } | null>(null);
+  const bgRef        = useRef<ReturnType<typeof initBackground> | null>(null);
   const lastTsRef    = useRef<number>(0);
   const birdAnimRef  = useRef<BirdAnimState>(BirdRenderer.createState());
   const scoreRef     = useRef(0);
@@ -94,7 +94,7 @@ export const GameCanvas: React.FC<Props> = ({ width, height, socket, roomId }) =
 
       // Advance background
       if (status === 'playing') {
-        updateBackground(bg.clouds, width, deltaMs);
+        updateBackground(bg.clouds, bg.grass, width, deltaMs);
       }
 
       // Update bird animation state
@@ -106,7 +106,7 @@ export const GameCanvas: React.FC<Props> = ({ width, height, socket, roomId }) =
       BirdRenderer.update(birdAnimRef.current, ts, velocity, scoreRef.current, nearCol, status === 'dead');
 
       // Draw background
-      drawBackground(ctx, width, height, colors, bg.stars, bg.clouds, ts);
+      drawBackground(ctx, width, height, colors, bg.stars, bg.clouds, bg.grass, bg.rocks, ts);
 
       // Draw pipes + bird
       if (gameState) {

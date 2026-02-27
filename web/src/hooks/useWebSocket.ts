@@ -7,19 +7,22 @@ import {
   LeaderboardUpdate,
 } from '../types';
 import { loadToken, clearAuthStorage } from '../services/authStorage';
+import { getGuestId, getGuestUsername } from '../services/guestSession';
 
-type RoomJoinedPayload  = { roomId: string; playerId: string; hostId: string };
+type RoomJoinedPayload   = { roomId: string; playerId: string; hostId: string };
 type PlayerJoinedPayload = { playerId: string; userId: string; username: string };
 type PlayerLeftPayload   = { userId: string };
 type RoomClosedPayload   = { reason: string };
 type ErrorPayload        = { message: string };
 
-const WS_URL = import.meta.env.VITE_WS_URL ?? '';
+const WS_URL      = import.meta.env.VITE_WS_URL ?? '';
+const ENABLE_AUTH = import.meta.env.VITE_ENABLE_AUTH !== 'false';
 
 export function useWebSocket(): Socket | null {
   const socketRef = useRef<Socket | null>(null);
   const {
     user,
+    guest,
     leaderboard: currentLb,
     setScreen,
     setUser,
@@ -34,6 +37,7 @@ export function useWebSocket(): Socket | null {
     setWsError,
   } = useGameStore((s) => ({
     user:             s.user,
+    guest:            s.guest,
     leaderboard:      s.leaderboard,
     setScreen:        s.setScreen,
     setUser:          s.setUser,
@@ -48,19 +52,33 @@ export function useWebSocket(): Socket | null {
     setWsError:       s.setWsError,
   }));
 
-  // Keep a ref to the current leaderboard so the event handler closure is fresh
   const lbRef = useRef<LeaderboardEntry[]>(currentLb);
   lbRef.current = currentLb;
 
-  useEffect(() => {
-    if (!user?.token) return;
+  // When auth is disabled (V1) we connect as soon as a guest identity exists.
+  // When auth is enabled we connect as soon as we have a JWT token.
+  const connectionKey = ENABLE_AUTH
+    ? user?.token
+    : (guest?.id ?? user?.id ?? null);
 
-    // Prefer in-memory token; localStorage is a reliable fallback after page reload
-    const token = user.token || loadToken() || '';
-    if (!token) return;
+  useEffect(() => {
+    // ── Determine socket auth payload ──────────────────────────────
+    let socketAuth: Record<string, string>;
+
+    if (ENABLE_AUTH) {
+      const token = user?.token || loadToken() || '';
+      if (!token) return; // no session yet
+      socketAuth = { token };
+    } else {
+      // V1: pass userId + username; server accepts them without JWT verification
+      const id       = guest?.id       ?? user?.id       ?? getGuestId();
+      const username = guest?.username ?? user?.username ?? getGuestUsername(id);
+      if (!id) return;
+      socketAuth = { userId: id, username };
+    }
 
     const socket = io(WS_URL, {
-      auth:                { token },
+      auth:                socketAuth,
       transports:          ['websocket'],
       reconnectionAttempts: 5,
     });
@@ -78,7 +96,7 @@ export function useWebSocket(): Socket | null {
     });
 
     // ── Auth failures ───────────────────────────────────
-    // Socket.IO fires `connect_error` when the server's io.use() middleware
+    // Only relevant when ENABLE_AUTH=true; harmless otherwise.
     // calls next(new Error(...)). We detect auth-specific messages and force
     // the user back to the login screen.
     socket.on('connect_error', (err: Error) => {
@@ -173,7 +191,7 @@ export function useWebSocket(): Socket | null {
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [user?.token]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [connectionKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return socketRef.current;
 }

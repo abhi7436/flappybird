@@ -22,6 +22,11 @@ import {
   getGuestUsername,
 } from './services/guestSession';
 
+// Mirrors the server-side ENABLE_AUTH flag.
+// Set VITE_ENABLE_AUTH=false in web/.env to skip login for V1.
+// Set VITE_ENABLE_AUTH=true (and server ENABLE_AUTH=true) to re-enable accounts.
+const ENABLE_AUTH = import.meta.env.VITE_ENABLE_AUTH !== 'false';
+
 const CANVAS_W = 400;
 const CANVAS_H = 600;
 
@@ -230,9 +235,10 @@ const MenuScreen: React.FC = () => {
   const { play } = useSound();
   const { requireAuth } = useAuthGuard();
   const { logout } = useAuth();
-  const { user, setScreen, selectedSkin, setSkin, setSoloHighScore,
+  const { user, guest, setScreen, selectedSkin, setSkin, setSoloHighScore,
           setPendingJoinRoomId } = useGameStore((s) => ({
     user:                 s.user,
+    guest:                s.guest,
     setScreen:            s.setScreen,
     selectedSkin:         s.selectedSkin,
     setSkin:              s.setSkin,
@@ -246,15 +252,22 @@ const MenuScreen: React.FC = () => {
   const createRoom = async () => {
     play('menuClick');
     try {
+      // Build request headers: JWT Bearer when auth is enabled, guest headers for V1
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (ENABLE_AUTH && user?.token) {
+        headers['Authorization'] = `Bearer ${user.token}`;
+      } else {
+        headers['x-user-id']  = guest?.id       ?? user?.id   ?? getGuestId();
+        headers['x-username'] = guest?.username ?? user?.username ?? 'Player';
+      }
       const res  = await fetch('/api/rooms', {
         method:      'POST',
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${user!.token}` },
+        headers,
         body:    JSON.stringify({ maxPlayers: 50 }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message);
-      // Lobby's useEffect will emit join_room → server fires room_joined → sets room in store
       setPendingJoinRoomId(data.roomId);
       setScreen('lobby');
     } catch (err) {
@@ -293,7 +306,8 @@ const MenuScreen: React.FC = () => {
           {(Object.keys(BIRD_SKINS) as BirdSkinId[]).map((id) => {
             const s = BIRD_SKINS[id];
             const active = id === selectedSkin;
-            const locked = user ? (user.highScore < s.unlockScore) : true;
+            // V1: all skins unlocked (no account highScore to gate against)
+            const locked = ENABLE_AUTH && (user ? (user.highScore < s.unlockScore) : true);
             return (
               <button
                 key={id}
@@ -325,13 +339,13 @@ const MenuScreen: React.FC = () => {
           onClick={() => requireAuth(createRoom)}
           className="btn-primary py-4 text-lg font-bold"
         >
-          {user ? 'Create Room' : '🔒 Create Room'}
+          {ENABLE_AUTH && !user ? '🔒 Create Room' : 'Create Room'}
         </button>
         <button
           onClick={() => requireAuth(() => setShowJoinModal(true))}
           className="btn-secondary py-3"
         >
-          {user ? 'Join Room' : '🔒 Join Room'}
+          {ENABLE_AUTH && !user ? '🔒 Join Room' : 'Join Room'}
         </button>
         <button
           onClick={() => {
@@ -354,12 +368,15 @@ const MenuScreen: React.FC = () => {
         onJoined={handleJoined}
       />
 
-      <button
-        onClick={() => { logout(); play('menuClick'); }}
-        className="text-white/30 text-xs hover:text-white/70 transition-colors"
-      >
-        Log out
-      </button>
+      {/* Only show logout when auth is enabled and a user is logged in */}
+      {ENABLE_AUTH && user && (
+        <button
+          onClick={() => { logout(); play('menuClick'); }}
+          className="text-white/30 text-xs hover:text-white/70 transition-colors"
+        >
+          Log out
+        </button>
+      )}
     </div>
   );
 };
@@ -379,12 +396,12 @@ const SoloScreen: React.FC = () => {
 
   const handleBackToMenu = () => {
     play('menuClick');
-    if (user) {
-      setScreen('menu');
-    } else {
-      // guest → back to auth
+    if (ENABLE_AUTH && !user) {
+      // Auth enabled and user is a guest → back to auth screen
       setGuest(null);
       setScreen('auth');
+    } else {
+      setScreen('menu');
     }
   };
 
@@ -490,9 +507,22 @@ const App: React.FC = () => {
   // ── Session restore on app mount ────────────────────────────────
   useEffect(() => {
     setIsRestoring(true);
+
+    if (!ENABLE_AUTH) {
+      // V1: auth is disabled — skip session restore, auto-assign a stable guest
+      // identity and jump straight to the menu.  Set VITE_ENABLE_AUTH=true to
+      // restore the login flow without any further code changes.
+      const id   = getGuestId();
+      const best = getGuestHighScore();
+      useGameStore.getState().setGuest({ id, username: getGuestUsername(id), highScore: best });
+      useGameStore.getState().setSoloHighScore(best);
+      useGameStore.getState().setScreen('menu');
+      setIsRestoring(false);
+      return;
+    }
+
     restoreSession().then((authUser) => {
       if (authUser) {
-        // Valid session found — jump straight to menu
         useGameStore.getState().setScreen('menu');
       }
       setIsRestoring(false);
