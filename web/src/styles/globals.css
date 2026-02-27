@@ -1,0 +1,87 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Root variables ──────────────────────────────────────── */
+:root {
+  --sky-top:    #87CEEB;
+  --sky-bottom: #B0E0FF;
+  --ground:     #8B6914;
+  --pipe:       #4CAF50;
+  font-family: 'Nunito', sans-serif;
+}
+
+.dark {
+  --sky-top:    #0F0C29;
+  --sky-bottom: #302B63;
+  --ground:     #3D2B1F;
+  --pipe:       #2E7D32;
+}
+
+/* ── Glassmorphism utility ───────────────────────────────── */
+.glass {
+  background: rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.glass-dark {
+  background: rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* ── Gradient text ───────────────────────────────────────── */
+.gradient-text {
+  background: linear-gradient(135deg, #FFD700, #FF6B35);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.gradient-text-blue {
+  background: linear-gradient(135deg, #63B3ED, #9F7AEA);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── Button styles ───────────────────────────────────────── */
+.btn-primary {
+  @apply inline-flex items-center justify-center gap-2 px-6 py-3
+         rounded-2xl font-bold text-white select-none cursor-pointer
+         transition-all duration-200 active:scale-95;
+  background: linear-gradient(135deg, #FFD700, #FF6B35);
+  box-shadow: 0 4px 16px rgba(255, 107, 53, 0.4);
+}
+
+.btn-primary:hover { filter: brightness(1.08); transform: translateY(-1px); }
+
+.btn-secondary {
+  @apply inline-flex items-center justify-center gap-2 px-6 py-3
+         rounded-2xl font-bold select-none cursor-pointer
+         transition-all duration-200 active:scale-95;
+  @apply glass text-white;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+
+.btn-secondary:hover { background: rgba(255,255,255,0.2); transform: translateY(-1px); }
+
+.btn-danger {
+  @apply inline-flex items-center justify-center gap-2 px-6 py-3
+         rounded-2xl font-bold text-white select-none cursor-pointer
+         transition-all duration-200 active:scale-95 bg-red-500 hover:bg-red-600;
+}
+
+/* ── Scrollbar ───────────────────────────────────────────── */
+::-webkit-scrollbar      { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.3); border-radius: 3px; }
+
+/* ── Canvas crisp rendering ──────────────────────────────── */
+canvas { image-rendering: pixelated; image-rendering: crisp-edges; }
+
+/* ── Prevent body scroll on game screen ─────────────────── */
+body { overflow: hidden; background: #0F0C29; }
