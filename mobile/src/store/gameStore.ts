@@ -47,10 +47,14 @@ interface GameStore {
   setSpectatingRoomId: (id: string | null) => void;
 
   // ── Players in lobby ────────────────────────────────────────
-  lobbyPlayers: Array<{ playerId: string; username: string }>;
-  addLobbyPlayer: (p: { playerId: string; username: string }) => void;
+  lobbyPlayers: Array<{ playerId: string; userId: string; username: string }>;
+  addLobbyPlayer: (p: { playerId: string; userId: string; username: string }) => void;
   removeLobbyPlayer: (playerId: string) => void;
   clearLobby: () => void;
+
+  // ── Room host ────────────────────────────────────────────────
+  roomHostId: string | null;
+  setRoomHostId: (id: string | null) => void;
 
   // ── Game lifecycle ──────────────────────────────────────────
   gameStarted: boolean;
@@ -107,13 +111,16 @@ export const useGameStore = create<GameStore>((set) => ({
   addLobbyPlayer: (p) =>
     set((s) => {
       if (s.lobbyPlayers.some((x) => x.playerId === p.playerId)) return s;
-      return { lobbyPlayers: [...s.lobbyPlayers, p] };
+      return { lobbyPlayers: [...s.lobbyPlayers, { playerId: p.playerId, userId: p.userId, username: p.username }] };
     }),
   removeLobbyPlayer: (playerId) =>
     set((s) => ({
       lobbyPlayers: s.lobbyPlayers.filter((x) => x.playerId !== playerId),
     })),
   clearLobby: () => set({ lobbyPlayers: [] }),
+
+  roomHostId: null,
+  setRoomHostId: (id) => set({ roomHostId: id }),
 
   gameStarted: false,
   setGameStarted: (v) => set({ gameStarted: v }),

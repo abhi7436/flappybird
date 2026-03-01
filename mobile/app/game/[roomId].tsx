@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useCallback } from 'react';
-import { View, StyleSheet, TouchableOpacity, Text } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Text, FlatList } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useGameStore } from '../../src/store/gameStore';
@@ -12,13 +12,19 @@ export default function GameScreen() {
   const { roomId, t: joinToken } = useLocalSearchParams<{ roomId: string; t?: string }>();
   const router                   = useRouter();
 
-  const user         = useGameStore((s) => s.user);
-  const finalRanking = useGameStore((s) => s.finalRanking);
-  const setFinal     = useGameStore((s) => s.setFinalRanking);
-  const clearLobby   = useGameStore((s) => s.clearLobby);
-  const gameStarted  = useGameStore((s) => s.gameStarted);
+  const user          = useGameStore((s) => s.user);
+  const finalRanking  = useGameStore((s) => s.finalRanking);
+  const setFinal      = useGameStore((s) => s.setFinalRanking);
+  const clearLobby    = useGameStore((s) => s.clearLobby);
+  const gameStarted   = useGameStore((s) => s.gameStarted);
+  const setGameStarted = useGameStore((s) => s.setGameStarted);
+  const lobbyPlayers  = useGameStore((s) => s.lobbyPlayers);
+  const roomHostId    = useGameStore((s) => s.roomHostId);
+  const setRoomHostId = useGameStore((s) => s.setRoomHostId);
 
-  const { joinRoom, leaveRoom, sendScore, sendGameOver } = useWebSocket();
+  const isHost = user?.id === roomHostId;
+
+  const { joinRoom, leaveRoom, sendScore, sendGameOver, startGame } = useWebSocket();
 
   // Track last sent score to debounce WS messages (send at most every 250ms)
   const lastSentScore  = useRef(-1);
@@ -27,6 +33,8 @@ export default function GameScreen() {
   useEffect(() => {
     if (!roomId) return;
     clearLobby();
+    setGameStarted(false);
+    setRoomHostId(null);
     // Validate + join room via WebSocket
     joinRoom(roomId, joinToken);
 
@@ -61,6 +69,57 @@ export default function GameScreen() {
     router.replace('/(tabs)');
   }
 
+  // ── Lobby (pre-game waiting room) ──────────────────────────
+  if (!gameStarted && !finalRanking) {
+    return (
+      <SafeAreaView style={styles.lobby}>
+        <View style={styles.lobbyHeader}>
+          <Text style={styles.lobbyTitle}>🎮 Room Lobby</Text>
+          <Text style={styles.lobbyRoomId} selectable>{roomId}</Text>
+          <Text style={styles.lobbyHint}>Share the Room ID above with friends</Text>
+        </View>
+
+        <Text style={styles.lobbyPlayersHeading}>
+          Players ({lobbyPlayers.length})
+        </Text>
+        <FlatList
+          data={lobbyPlayers.map((p) => ({
+            ...p,
+            username: p.username + (p.userId === roomHostId ? ' 👑' : ''),
+          }))}
+          keyExtractor={(item) => item.playerId}
+          renderItem={({ item }) => (
+            <View style={styles.lobbyPlayerRow}>
+              <Text style={styles.lobbyPlayerName}>{item.username}</Text>
+            </View>
+          )}
+          style={styles.lobbyPlayerList}
+          contentContainerStyle={{ gap: 8 }}
+        />
+
+        <View style={styles.lobbyActions}>
+          {isHost ? (
+            <TouchableOpacity
+              style={styles.startBtn}
+              onPress={() => startGame(roomId!)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.startBtnText}>▶ Start Game</Text>
+            </TouchableOpacity>
+          ) : (
+            <Text style={styles.waitingText}>Waiting for host to start…</Text>
+          )}
+          <TouchableOpacity
+            style={styles.leaveBtn}
+            onPress={() => { leaveRoom(roomId!); router.replace('/(tabs)'); }}
+          >
+            <Text style={styles.leaveBtnText}>✕ Leave</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <View style={styles.root}>
       {/* Game canvas — fills entire screen */}
@@ -83,7 +142,7 @@ export default function GameScreen() {
       {!finalRanking && (
         <SafeAreaView style={styles.topBar} pointerEvents="box-none">
           <TouchableOpacity
-            style={styles.leaveBtn}
+            style={styles.inGameLeaveBtn}
             onPress={() => {
               leaveRoom(roomId!);
               router.replace('/(tabs)');
@@ -103,6 +162,7 @@ export default function GameScreen() {
 }
 
 const styles = StyleSheet.create({
+  // ── In-game styles ─────────────────────────────────────────
   root: { flex: 1, backgroundColor: '#000' },
   topBar: {
     position: 'absolute',
@@ -111,7 +171,7 @@ const styles = StyleSheet.create({
     right: 0,
     pointerEvents: 'box-none',
   },
-  leaveBtn: {
+  inGameLeaveBtn: {
     margin: 12,
     backgroundColor: 'rgba(0,0,0,0.45)',
     borderRadius: 10,
@@ -125,5 +185,45 @@ const styles = StyleSheet.create({
     bottom: 100,
     right: 12,
     maxWidth: 240,
+  },
+  // ── Lobby styles ────────────────────────────────────────────
+  lobby: { flex: 1, backgroundColor: '#1a1a2e', padding: 24, gap: 16 },
+  lobbyHeader: { alignItems: 'center', gap: 6, marginBottom: 8 },
+  lobbyTitle: { color: '#f7c59f', fontWeight: '800', fontSize: 24 },
+  lobbyRoomId: {
+    color: '#74b9ff',
+    fontWeight: '700',
+    fontSize: 18,
+    letterSpacing: 2,
+    backgroundColor: 'rgba(116,185,255,0.12)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 10,
+  },
+  lobbyHint: { color: 'rgba(255,255,255,0.35)', fontSize: 12 },
+  lobbyPlayersHeading: { color: 'rgba(255,255,255,0.6)', fontSize: 13, fontWeight: '600' },
+  lobbyPlayerList: { flex: 1 },
+  lobbyPlayerRow: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  lobbyPlayerName: { color: '#fff', fontWeight: '600', fontSize: 15 },
+  lobbyActions: { gap: 12 },
+  startBtn: {
+    backgroundColor: '#f7c59f',
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  startBtnText: { color: '#1a1a2e', fontWeight: '800', fontSize: 16 },
+  waitingText: { color: 'rgba(255,255,255,0.45)', textAlign: 'center', fontSize: 14 },
+  leaveBtn: {
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
   },
 });

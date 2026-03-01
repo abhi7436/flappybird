@@ -31,7 +31,7 @@ export class RoomManager {
     const room = this.getOrCreateRoom(roomId);
     room.set(player.id, player);
     RoomService.incrementPlayerCount(roomId, 1).catch(() => {});
-    RoomService.setStatus(roomId, 'active').catch(() => {});
+    // Do NOT set status to 'active' here — the host sets it via start_game.
     return true;
   }
 

@@ -17,6 +17,7 @@ export function useWebSocket() {
   const addLobbyPlayer     = useGameStore((s) => s.addLobbyPlayer);
   const removeLobbyPlayer  = useGameStore((s) => s.removeLobbyPlayer);
   const setGameStarted     = useGameStore((s) => s.setGameStarted);
+  const setRoomHostId      = useGameStore((s) => s.setRoomHostId);
   const setPendingInvite   = useGameStore((s) => s.setPendingInvite);
   const setEloChange       = useGameStore((s) => s.setEloChange);
   const addUnlockedSkins   = useGameStore((s) => s.addUnlockedSkins);
@@ -51,7 +52,18 @@ export function useWebSocket() {
     });
 
     // ── Lobby events ──────────────────────────────────────
-    socket.on('player_joined', (data: { playerId: string; username: string }) => {
+    socket.on(
+      'room_joined',
+      (data: { roomId: string; playerId: string; hostId: string }) => {
+        setRoomHostId(data.hostId);
+      }
+    );
+
+    socket.on('host_changed', (data: { newHostId: string }) => {
+      setRoomHostId(data.newHostId);
+    });
+
+    socket.on('player_joined', (data: { playerId: string; userId: string; username: string }) => {
       addLobbyPlayer(data);
     });
 
