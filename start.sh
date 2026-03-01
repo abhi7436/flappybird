@@ -69,15 +69,15 @@ nc -z localhost 6379 2>/dev/null \
   && success "Redis is reachable." \
   || die "Redis is not running on :6379.\n   Start it with: brew services start redis  (or your local equivalent)"
 
+# ── Server dependencies ───────────────────────────────────────
+# Always run npm install so missing/partial node_modules are healed.
+# npm ci is a no-op when package-lock.json hasn't changed.
+info "Installing server dependencies…"
+cd "$ROOT" && npm install --prefer-offline --silent
+
 # ── Auto-provision DB (idempotent) ────────────────────────────
 info "Ensuring database + schema are up to date…"
 node "$ROOT/scripts/setup-local-db.js" || die "Database setup failed. See above."
-
-# ── Server dependencies ───────────────────────────────────────
-if [[ ! -d "$ROOT/node_modules" ]]; then
-  info "Installing server dependencies…"
-  cd "$ROOT" && npm install
-fi
 
 # ── Backend dev server ────────────────────────────────────────
 info "Starting backend server (ts-node-dev)…"
@@ -105,10 +105,8 @@ done
 if [[ "$MODE" == "dev" || "$MODE" == "all" ]]; then
   WEB_DIR="$ROOT/web"
   if [[ -d "$WEB_DIR" ]]; then
-    if [[ ! -d "$WEB_DIR/node_modules" ]]; then
-      info "Installing web dependencies…"
-      cd "$WEB_DIR" && npm install
-    fi
+    info "Installing web dependencies…"
+    cd "$WEB_DIR" && npm install --prefer-offline --silent
     info "Starting web client (Vite)…"
     LOG_WEB="$LOG_DIR/web.log"
     cd "$WEB_DIR"
@@ -123,10 +121,8 @@ fi
 if [[ "$MODE" == "mobile" || "$MODE" == "all" ]]; then
   MOBILE_DIR="$ROOT/mobile"
   if [[ -d "$MOBILE_DIR" ]]; then
-    if [[ ! -d "$MOBILE_DIR/node_modules" ]]; then
-      info "Installing mobile dependencies…"
-      cd "$MOBILE_DIR" && npm install
-    fi
+    info "Installing mobile dependencies…"
+    cd "$MOBILE_DIR" && npm install --prefer-offline --silent
     info "Starting Expo dev server…"
     LOG_MOBILE="$LOG_DIR/mobile.log"
     cd "$MOBILE_DIR"
