@@ -17,6 +17,7 @@ export function useWebSocket() {
   const addLobbyPlayer     = useGameStore((s) => s.addLobbyPlayer);
   const removeLobbyPlayer  = useGameStore((s) => s.removeLobbyPlayer);
   const setGameStarted     = useGameStore((s) => s.setGameStarted);
+  const setGameCountdown   = useGameStore((s) => s.setGameCountdown);
   const setRoomHostId      = useGameStore((s) => s.setRoomHostId);
   const setPendingInvite   = useGameStore((s) => s.setPendingInvite);
   const setEloChange       = useGameStore((s) => s.setEloChange);
@@ -54,8 +55,14 @@ export function useWebSocket() {
     // ── Lobby events ──────────────────────────────────────
     socket.on(
       'room_joined',
-      (data: { roomId: string; playerId: string; hostId: string }) => {
+      (data: { roomId: string; playerId: string; hostId: string; players?: Array<{ playerId: string; userId: string; username: string }> }) => {
         setRoomHostId(data.hostId);
+        // Seed the lobby with players already in the room when we joined
+        if (data.players?.length) {
+          for (const p of data.players) {
+            addLobbyPlayer(p);
+          }
+        }
       }
     );
 
@@ -71,7 +78,23 @@ export function useWebSocket() {
       removeLobbyPlayer(data.playerId);
     });
 
+    // ── Server-driven countdown (shown to ALL players) ──────────────
+    socket.on('game_starting', ({ countdown }: { countdown: number }) => {
+      setGameCountdown(countdown);
+      let n = countdown - 1;
+      const iv = setInterval(() => {
+        if (n <= 0) {
+          clearInterval(iv);
+          setGameCountdown(0);
+        } else {
+          setGameCountdown(n);
+          n--;
+        }
+      }, 1000);
+    });
+
     socket.on('game_started', () => {
+      setGameCountdown(null);
       setGameStarted(true);
     });
 

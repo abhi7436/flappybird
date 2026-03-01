@@ -21,6 +21,8 @@ export default function GameScreen() {
   const lobbyPlayers  = useGameStore((s) => s.lobbyPlayers);
   const roomHostId    = useGameStore((s) => s.roomHostId);
   const setRoomHostId = useGameStore((s) => s.setRoomHostId);
+  const gameCountdown = useGameStore((s) => s.gameCountdown);
+  const setGameCountdown = useGameStore((s) => s.setGameCountdown);
 
   const isHost = user?.id === roomHostId;
 
@@ -34,6 +36,7 @@ export default function GameScreen() {
     if (!roomId) return;
     clearLobby();
     setGameStarted(false);
+    setGameCountdown(null);
     setRoomHostId(null);
     // Validate + join room via WebSocket
     joinRoom(roomId, joinToken);
@@ -100,8 +103,9 @@ export default function GameScreen() {
         <View style={styles.lobbyActions}>
           {isHost ? (
             <TouchableOpacity
-              style={styles.startBtn}
+              style={[styles.startBtn, gameCountdown !== null && styles.btnDisabled]}
               onPress={() => startGame(roomId!)}
+              disabled={gameCountdown !== null}
               activeOpacity={0.8}
             >
               <Text style={styles.startBtnText}>▶ Start Game</Text>
@@ -110,12 +114,22 @@ export default function GameScreen() {
             <Text style={styles.waitingText}>Waiting for host to start…</Text>
           )}
           <TouchableOpacity
-            style={styles.leaveBtn}
+            style={[styles.leaveBtn, gameCountdown !== null && styles.btnDisabled]}
             onPress={() => { leaveRoom(roomId!); router.replace('/(tabs)'); }}
+            disabled={gameCountdown !== null}
           >
             <Text style={styles.leaveBtnText}>✕ Leave</Text>
           </TouchableOpacity>
         </View>
+
+        {/* Countdown overlay — shown to ALL players when host presses Start */}
+        {gameCountdown !== null && (
+          <View style={styles.countdownOverlay}>
+            <Text style={styles.countdownNumber}>
+              {gameCountdown === 0 ? '🐦' : String(gameCountdown)}
+            </Text>
+          </View>
+        )}
       </SafeAreaView>
     );
   }
@@ -225,5 +239,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.15)',
+  },
+  btnDisabled: { opacity: 0.4 },
+  // ── Countdown overlay ──────────────────────────────────────
+  countdownOverlay: {
+    position: 'absolute',
+    inset: 0,
+    top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 0,
+  },
+  countdownNumber: {
+    color: '#fff',
+    fontSize: 120,
+    fontWeight: '900',
+    textShadowColor: 'rgba(255,215,0,0.8)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 32,
   },
 });

@@ -8,7 +8,12 @@ import {
 } from '../types';
 import { loadToken, clearAuthStorage } from '../services/authStorage';
 
-type RoomJoinedPayload  = { roomId: string; playerId: string; hostId: string };
+type RoomJoinedPayload  = {
+  roomId: string;
+  playerId: string;
+  hostId: string;
+  players?: Array<{ playerId: string; userId: string; username: string }>;
+};
 type PlayerJoinedPayload = { playerId: string; userId: string; username: string };
 type PlayerLeftPayload   = { userId: string };
 type RoomClosedPayload   = { reason: string };
@@ -32,6 +37,7 @@ export function useWebSocket(): Socket | null {
     addRoomPlayer,
     removeRoomPlayer,
     setWsError,
+    setGameCountdown,
   } = useGameStore((s) => ({
     user:             s.user,
     leaderboard:      s.leaderboard,
@@ -46,6 +52,7 @@ export function useWebSocket(): Socket | null {
     addRoomPlayer:    s.addRoomPlayer,
     removeRoomPlayer: s.removeRoomPlayer,
     setWsError:       s.setWsError,
+    setGameCountdown: s.setGameCountdown,
   }));
 
   // Keep a ref to the current leaderboard so the event handler closure is fresh
@@ -99,8 +106,16 @@ export function useWebSocket(): Socket | null {
     });
 
     // ── room_joined ─────────────────────────────────────
-    socket.on('room_joined', ({ roomId, hostId }: RoomJoinedPayload) => {
+    socket.on('room_joined', ({ roomId, hostId, players }: RoomJoinedPayload) => {
       setRoom({ id: roomId, hostId, joinUrl: '', joinToken: '', playerCount: 1, status: 'waiting' });
+      // Seed the lobby player list with everyone already in the room when we join.
+      // Their individual player_joined events fired before we arrived so we
+      // would have missed them otherwise.
+      if (players?.length) {
+        for (const p of players) {
+          addRoomPlayer({ userId: p.userId, username: p.username, avatar: null, ready: false, highScore: 0 });
+        }
+      }
       setScreen('lobby');
     });
 
@@ -139,7 +154,23 @@ export function useWebSocket(): Socket | null {
       setScore(0);
       setIsAlive(true);
       setFinalRanking(null);
+      setGameCountdown(null);
       setScreen('game');
+    });
+
+    // ── game_starting (server-driven 3-s countdown shown to all players) ─
+    socket.on('game_starting', ({ countdown }: { countdown: number }) => {
+      setGameCountdown(countdown);
+      let n = countdown - 1;
+      const iv = setInterval(() => {
+        if (n <= 0) {
+          clearInterval(iv);
+          setGameCountdown(0);
+        } else {
+          setGameCountdown(n);
+          n--;
+        }
+      }, 1000);
     });
 
     socket.on('room_closed', (_: RoomClosedPayload) => {

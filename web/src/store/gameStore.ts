@@ -72,6 +72,10 @@ interface GameStore {
   wsError: string | null;
   setWsError: (msg: string | null) => void;
 
+  // ── Lobby countdown (server-driven: fires on game_starting for all players) ─
+  gameCountdown: number | null;
+  setGameCountdown: (n: number | null) => void;
+
   // ── Game state reset ────────────────────────────────────────
   /** Clears all in-game state when leaving a game */
   resetGameState: () => void;}
@@ -136,13 +140,17 @@ export const useGameStore = create<GameStore>((set) => ({
   wsError: null,
   setWsError: (wsError) => set({ wsError }),
 
+  gameCountdown: null,
+  setGameCountdown: (gameCountdown) => set({ gameCountdown }),
+
   resetGameState: () => set({
-    score:        0,
-    isAlive:      true,
-    finalScore:   0,
-    leaderboard:  [],
-    finalRanking: null,
-    room:         null,
-    roomPlayers:  [],
+    score:         0,
+    isAlive:       true,
+    finalScore:    0,
+    leaderboard:   [],
+    finalRanking:  null,
+    room:          null,
+    roomPlayers:   [],
+    gameCountdown: null,
   }),
 }));

@@ -56,6 +56,10 @@ interface GameStore {
   roomHostId: string | null;
   setRoomHostId: (id: string | null) => void;
 
+  // ── Lobby countdown (server-driven) ─────────────────────────────
+  gameCountdown: number | null;
+  setGameCountdown: (n: number | null) => void;
+
   // ── Game lifecycle ──────────────────────────────────────────
   gameStarted: boolean;
   setGameStarted: (v: boolean) => void;
@@ -121,6 +125,9 @@ export const useGameStore = create<GameStore>((set) => ({
 
   roomHostId: null,
   setRoomHostId: (id) => set({ roomHostId: id }),
+
+  gameCountdown: null,
+  setGameCountdown: (gameCountdown) => set({ gameCountdown }),
 
   gameStarted: false,
   setGameStarted: (v) => set({ gameStarted: v }),

@@ -206,6 +206,13 @@ export async function initializeWebSocketServer(
           lastScoreAt: Date.now(),
         };
 
+        // Snapshot players already in the room BEFORE adding the new one.
+        // These are sent in room_joined so the joiner can populate their lobby list
+        // without relying on player_joined events they missed.
+        const existingPlayers = Array.from(
+          roomManager.getRoom(roomId)?.values() ?? []
+        ).map((p) => ({ playerId: p.id, userId: p.userId, username: p.username }));
+
         roomManager.addPlayer(roomId, player);
         socket.join(roomId);
         socketRoomMap.set(socket.id, { roomId, userId: user.userId });
@@ -224,6 +231,7 @@ export async function initializeWebSocketServer(
           roomId,
           playerId: socket.id,
           hostId:   roomMeta?.createdBy ?? user.userId,
+          players:  existingPlayers,
         });
         io.to(roomId).emit('player_joined', {
           playerId: socket.id,
@@ -390,7 +398,12 @@ export async function initializeWebSocketServer(
       }
 
       await RoomService.setStatus(roomId, 'active');
-      io.to(roomId).emit('game_started', { startedAt: Date.now() });
+      // Broadcast the countdown to ALL players (host + joiners) so everyone
+      // sees the same 3-2-1 countdown before the game starts.
+      io.to(roomId).emit('game_starting', { countdown: 3 });
+      setTimeout(() => {
+        io.to(roomId).emit('game_started', { startedAt: Date.now() });
+      }, 3000);
     });
 
     // ── spectate_room ────────────────────────────────────

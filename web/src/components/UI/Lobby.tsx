@@ -81,6 +81,7 @@ export const Lobby: React.FC<Props> = ({ socket }) => {
     setPendingJoinRoomId,
     wsError,
     setWsError,
+    gameCountdown,
   } = useGameStore((s) => ({
     room:                 s.room,
     roomPlayers:          s.roomPlayers,
@@ -90,12 +91,16 @@ export const Lobby: React.FC<Props> = ({ socket }) => {
     setPendingJoinRoomId: s.setPendingJoinRoomId,
     wsError:              s.wsError,
     setWsError:           s.setWsError,
+    gameCountdown:        s.gameCountdown,
   }));
 
   const { play } = useSound();
-  const [countdown, setCountdown]       = useState<number | null>(null);
   const [connectError, setConnectError] = useState<string | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Derive countdown display values from the server-driven store field
+  const isCounting = gameCountdown !== null;
+  const countdown  = gameCountdown;
 
   // ── Clear wsError from the store when the Lobby unmounts ────────────
   useEffect(() => () => { setWsError(null); }, [setWsError]);
@@ -128,30 +133,16 @@ export const Lobby: React.FC<Props> = ({ socket }) => {
     setScreen('menu');
   };
 
-  // ── Countdown → start_game ─────────────────────────────────
+  // ── Start game: just signal the server; countdown runs server-side ─
   const handleStart = () => {
     if (!room) return;
     play('menuClick');
-
-    let n = 3;
-    setCountdown(n);
-    const iv = setInterval(() => {
-      n--;
-      if (n < 0) {
-        clearInterval(iv);
-        setCountdown(null);
-        socket?.emit('start_game', { roomId: room.id });
-      } else {
-        setCountdown(n);
-        if (n > 0) play('countdown');
-      }
-    }, 1000);
+    socket?.emit('start_game', { roomId: room.id });
   };
 
   // ── Derived ────────────────────────────────────────────────
-  const isHost     = !!user && room?.hostId === user.id;
-  const canStart   = roomPlayers.length >= 2;
-  const isCounting = countdown !== null;
+  const isHost   = !!user && room?.hostId === user.id;
+  const canStart = roomPlayers.length >= 2;
 
   // ── Render states ──────────────────────────────────────────
   // wsError (from store) takes priority: it covers real-time WS errors,
