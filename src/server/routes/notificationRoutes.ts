@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
+import { Types } from 'mongoose';
 import { requireAuth as authenticate } from '../middleware/authMiddleware';
-import { db } from '../database/connection';
+import { DeviceTokenModel } from '../database/models';
 
 const router = Router();
 
@@ -20,12 +21,10 @@ router.post('/register-token', authenticate, async (req: Request, res: Response)
   }
 
   try {
-    await db.none(
-      `INSERT INTO device_tokens (user_id, token, platform)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (user_id, token)
-       DO UPDATE SET platform = $3, updated_at = NOW()`,
-      [req.user!.userId, token, platform]
+    await DeviceTokenModel.updateOne(
+      { user_id: new Types.ObjectId(req.user!.userId), token },
+      { $set: { platform, updated_at: new Date() }, $setOnInsert: { user_id: new Types.ObjectId(req.user!.userId), token } },
+      { upsert: true }
     );
     res.json({ success: true });
   } catch (err) {
@@ -42,10 +41,10 @@ router.delete('/token', authenticate, async (req: Request, res: Response) => {
   const { token } = req.body;
   if (!token) return res.status(400).json({ error: 'token required' });
 
-  await db.none(
-    'DELETE FROM device_tokens WHERE user_id = $1 AND token = $2',
-    [req.user!.userId, token]
-  );
+  await DeviceTokenModel.deleteOne({
+    user_id: new Types.ObjectId(req.user!.userId),
+    token,
+  });
   res.json({ success: true });
 });
 

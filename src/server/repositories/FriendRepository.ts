@@ -1,102 +1,127 @@
-import { pool } from '../database/connection';
-import { FriendRecord, FriendWithUser } from '../types';
+import { Types } from 'mongoose';
+import { FriendModel, UserModel } from '../database/models';
+import { FriendRecord, FriendWithUser, PublicUser } from '../types';
+
+function toId(id: string) {
+  return new Types.ObjectId(id);
+}
+
+function toFriendRecord(doc: ReturnType<typeof FriendModel.prototype.toJSON>): FriendRecord {
+  const r = doc as Record<string, unknown>;
+  return {
+    id:           String(r['id']),
+    requester_id: String(r['requester_id']),
+    receiver_id:  String(r['receiver_id']),
+    status:       r['status'] as FriendRecord['status'],
+    created_at:   r['created_at'] as Date,
+    updated_at:   r['updated_at'] as Date,
+  };
+}
 
 export class FriendRepository {
   static async sendRequest(
     requesterId: string,
     receiverId: string
   ): Promise<FriendRecord> {
-    const { rows } = await pool.query<FriendRecord>(
-      `INSERT INTO friends (requester_id, receiver_id)
-       VALUES ($1, $2)
-       ON CONFLICT (requester_id, receiver_id) DO NOTHING
-       RETURNING *`,
-      [requesterId, receiverId]
-    );
-    if (!rows[0]) throw new Error('Friend request already exists');
-    return rows[0];
+    try {
+      const doc = await FriendModel.create({
+        requester_id: toId(requesterId),
+        receiver_id:  toId(receiverId),
+      });
+      return toFriendRecord(doc.toJSON());
+    } catch (err: any) {
+      if (err.code === 11000) throw new Error('Friend request already exists');
+      throw err;
+    }
   }
 
   static async acceptRequest(
     requesterId: string,
     receiverId: string
   ): Promise<FriendRecord> {
-    const { rows } = await pool.query<FriendRecord>(
-      `UPDATE friends
-          SET status = 'accepted'
-        WHERE requester_id = $1 AND receiver_id = $2 AND status = 'pending'
-        RETURNING *`,
-      [requesterId, receiverId]
+    const doc = await FriendModel.findOneAndUpdate(
+      { requester_id: toId(requesterId), receiver_id: toId(receiverId), status: 'pending' },
+      { $set: { status: 'accepted', updated_at: new Date() } },
+      { new: true }
     );
-    if (!rows[0]) throw new Error('No pending request found');
-    return rows[0];
+    if (!doc) throw new Error('No pending request found');
+    return toFriendRecord(doc.toJSON());
   }
 
   static async remove(userA: string, userB: string): Promise<void> {
-    await pool.query(
-      `DELETE FROM friends
-        WHERE (requester_id = $1 AND receiver_id = $2)
-           OR (requester_id = $2 AND receiver_id = $1)`,
-      [userA, userB]
-    );
+    await FriendModel.deleteMany({
+      $or: [
+        { requester_id: toId(userA), receiver_id: toId(userB) },
+        { requester_id: toId(userB), receiver_id: toId(userA) },
+      ],
+    });
   }
 
   static async block(
     requesterId: string,
     receiverId: string
   ): Promise<FriendRecord> {
-    const { rows } = await pool.query<FriendRecord>(
-      `INSERT INTO friends (requester_id, receiver_id, status)
-       VALUES ($1, $2, 'blocked')
-       ON CONFLICT (requester_id, receiver_id)
-       DO UPDATE SET status = 'blocked'
-       RETURNING *`,
-      [requesterId, receiverId]
+    const doc = await FriendModel.findOneAndUpdate(
+      { requester_id: toId(requesterId), receiver_id: toId(receiverId) },
+      { $set: { status: 'blocked', updated_at: new Date() } },
+      { upsert: true, new: true }
     );
-    return rows[0];
+    return toFriendRecord(doc!.toJSON());
   }
 
-  /** Returns accepted friends with their public profile attached */
+  /** Returns accepted friends with their public profile attached. */
   static async listFriends(userId: string): Promise<FriendWithUser[]> {
-    const { rows } = await pool.query<FriendWithUser>(
-      `SELECT f.*,
-              json_build_object(
-                'id',         u.id,
-                'username',   u.username,
-                'avatar',     u.avatar,
-                'high_score', u.high_score,
-                'is_online',  u.is_online,
-                'created_at', u.created_at,
-                'updated_at', u.updated_at
-              ) AS friend
-         FROM friends f
-         JOIN users u
-           ON (f.requester_id = $1 AND u.id = f.receiver_id)
-           OR (f.receiver_id  = $1 AND u.id = f.requester_id)
-        WHERE f.status = 'accepted'
-          AND ($1 = f.requester_id OR $1 = f.receiver_id)`,
-      [userId]
-    );
-    return rows;
+    const uid = toId(userId);
+    const docs = await FriendModel.find({
+      status: 'accepted',
+      $or: [{ requester_id: uid }, { receiver_id: uid }],
+    });
+
+    const results: FriendWithUser[] = [];
+    for (const doc of docs) {
+      const friendId = doc.requester_id.toString() === userId
+        ? doc.receiver_id
+        : doc.requester_id;
+
+      const friendUser = await UserModel.findById(friendId).select(
+        'id username avatar high_score elo_rating games_played is_online created_at updated_at'
+      );
+      if (!friendUser) continue;
+
+      const uJson = friendUser.toJSON() as Record<string, unknown>;
+      const friend: PublicUser = {
+        id:           String(uJson['id']),
+        username:     String(uJson['username']),
+        avatar:       (uJson['avatar'] as string) ?? null,
+        high_score:   uJson['high_score'] as number,
+        elo_rating:   uJson['elo_rating'] as number,
+        games_played: uJson['games_played'] as number,
+        is_online:    uJson['is_online'] as boolean,
+        created_at:   uJson['created_at'] as Date,
+        updated_at:   uJson['updated_at'] as Date,
+      };
+      results.push({ ...toFriendRecord(doc.toJSON()), friend });
+    }
+    return results;
   }
 
   static async listPending(userId: string): Promise<FriendRecord[]> {
-    const { rows } = await pool.query<FriendRecord>(
-      `SELECT * FROM friends
-        WHERE receiver_id = $1 AND status = 'pending'`,
-      [userId]
-    );
-    return rows;
+    const docs = await FriendModel.find({
+      receiver_id: toId(userId),
+      status: 'pending',
+    });
+    return docs.map((d) => toFriendRecord(d.toJSON()));
   }
 
   static async areFriends(userA: string, userB: string): Promise<boolean> {
-    const { rows } = await pool.query(
-      `SELECT 1 FROM friends
-        WHERE status = 'accepted'
-          AND ((requester_id = $1 AND receiver_id = $2)
-           OR  (requester_id = $2 AND receiver_id = $1))`,
-      [userA, userB]
-    );
-    return rows.length > 0;
+    const exists = await FriendModel.exists({
+      status: 'accepted',
+      $or: [
+        { requester_id: toId(userA), receiver_id: toId(userB) },
+        { requester_id: toId(userB), receiver_id: toId(userA) },
+      ],
+    });
+    return !!exists;
   }
 }
+

@@ -1,9 +1,10 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
+import { Types } from 'mongoose';
 import { requireAuth as authenticate } from '../middleware/authMiddleware';
 import { TournamentRepository } from '../repositories/TournamentRepository';
 import { TournamentService } from '../services/TournamentService';
-import { db } from '../database/connection';
+import { UserModel } from '../database/models';
 
 const router = Router();
 
@@ -56,10 +57,8 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
 /** POST /api/tournaments/:id/register */
 router.post('/:id/register', authenticate, async (req: Request, res: Response) => {
   try {
-    const { elo_rating } = await db.one<{ elo_rating: number }>(
-      'SELECT elo_rating FROM users WHERE id = $1',
-      [req.user!.userId]
-    );
+    const userDoc = await UserModel.findById(new Types.ObjectId(req.user!.userId)).select('elo_rating');
+    const elo_rating = userDoc ? (userDoc.toJSON() as Record<string, unknown>)['elo_rating'] as number : 1000;
     await TournamentRepository.register(req.params.id, req.user!.userId, elo_rating);
     res.json({ success: true });
   } catch (err: any) {

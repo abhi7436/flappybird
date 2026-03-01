@@ -1,36 +1,69 @@
-import { db } from '../database/connection';
+import { Types } from 'mongoose';
+import { SkinModel, UserSkinModel } from '../database/models';
 import { SkinRecord, UserSkinRecord, SkinWithOwnership } from '../types';
+
+function toSkinRecord(doc: Record<string, unknown>): SkinRecord {
+  return {
+    id:               String(doc['id'] ?? doc['_id']),
+    name:             doc['name'] as string,
+    description:      (doc['description'] as string) ?? null,
+    season:           (doc['season'] as SkinRecord['season']) ?? null,
+    rarity:           doc['rarity'] as SkinRecord['rarity'],
+    unlock_condition: (doc['unlock_condition'] as string) ?? null,
+    color_body:       doc['color_body'] as string,
+    color_wing:       doc['color_wing'] as string,
+    color_eye:        doc['color_eye'] as string,
+    color_beak:       doc['color_beak'] as string,
+    is_active:        doc['is_active'] as boolean,
+    min_elo:          doc['min_elo'] as number,
+    created_at:       doc['created_at'] as Date,
+  };
+}
+
+function toUserSkinRecord(doc: Record<string, unknown>): UserSkinRecord {
+  return {
+    id:          String(doc['id']),
+    user_id:     String(doc['user_id']),
+    skin_id:     doc['skin_id'] as string,
+    unlocked_at: doc['unlocked_at'] as Date,
+    is_equipped: doc['is_equipped'] as boolean,
+  };
+}
 
 export class SkinRepository {
   /** Fetch all active skins with ownership status for a given user. */
   static async getAllWithOwnership(userId: string): Promise<SkinWithOwnership[]> {
-    return db.any<SkinWithOwnership>(
-      `SELECT s.*,
-              (us.skin_id IS NOT NULL)              AS owned,
-              (us.is_equipped IS TRUE)              AS equipped
-         FROM skins s
-         LEFT JOIN user_skins us ON us.skin_id = s.id AND us.user_id = $1
-        WHERE s.is_active = TRUE
-        ORDER BY s.rarity DESC, s.name`,
-      [userId]
-    );
+    const uid = new Types.ObjectId(userId);
+    const [skins, owned] = await Promise.all([
+      SkinModel.find({ is_active: true }).sort({ min_elo: -1, name: 1 }),
+      UserSkinModel.find({ user_id: uid }),
+    ]);
+
+    const ownedMap = new Map(owned.map((us) => [us.skin_id, us]));
+
+    return skins.map((s) => {
+      const ownership = ownedMap.get(s._id as string);
+      return {
+        ...toSkinRecord(s.toJSON()),
+        owned:    !!ownership,
+        equipped: ownership?.is_equipped ?? false,
+      };
+    });
   }
 
   /** Return all skins owned by a user. */
   static async getOwned(userId: string): Promise<UserSkinRecord[]> {
-    return db.any(
-      `SELECT * FROM user_skins WHERE user_id = $1 ORDER BY unlocked_at`,
-      [userId]
-    );
+    const docs = await UserSkinModel.find({ user_id: new Types.ObjectId(userId) })
+      .sort({ unlocked_at: 1 });
+    return docs.map((d) => toUserSkinRecord(d.toJSON() as Record<string, unknown>));
   }
 
-  /** Grant a skin to a user (idempotent — safe to call multiple times). */
+  /** Grant a skin to a user (idempotent). */
   static async grant(userId: string, skinId: string): Promise<void> {
-    await db.none(
-      `INSERT INTO user_skins (user_id, skin_id)
-       VALUES ($1, $2)
-       ON CONFLICT (user_id, skin_id) DO NOTHING`,
-      [userId, skinId]
+    await UserSkinModel.updateOne(
+      { user_id: new Types.ObjectId(userId), skin_id: skinId },
+      { $setOnInsert: { user_id: new Types.ObjectId(userId), skin_id: skinId, is_equipped: false } },
+      { upsert: true }
     );
   }
 
@@ -40,53 +73,49 @@ export class SkinRepository {
    * Throws if the user does not own the skin.
    */
   static async equip(userId: string, skinId: string): Promise<void> {
-    const owns = await db.oneOrNone(
-      'SELECT 1 FROM user_skins WHERE user_id = $1 AND skin_id = $2',
-      [userId, skinId]
-    );
+    const uid = new Types.ObjectId(userId);
+    const owns = await UserSkinModel.exists({ user_id: uid, skin_id: skinId });
     if (!owns) throw new Error('SKIN_NOT_OWNED');
 
-    await db.tx(async (t) => {
-      await t.none('UPDATE user_skins SET is_equipped = FALSE WHERE user_id = $1', [userId]);
-      await t.none(
-        'UPDATE user_skins SET is_equipped = TRUE WHERE user_id = $1 AND skin_id = $2',
-        [userId, skinId]
-      );
-    });
+    // Un-equip all, then equip the chosen one
+    await UserSkinModel.updateMany({ user_id: uid }, { $set: { is_equipped: false } });
+    await UserSkinModel.updateOne(
+      { user_id: uid, skin_id: skinId },
+      { $set: { is_equipped: true } }
+    );
   }
 
   /** Returns the currently equipped skin id (or 'classic' as fallback). */
   static async getEquipped(userId: string): Promise<string> {
-    const row = await db.oneOrNone<{ skin_id: string }>(
-      'SELECT skin_id FROM user_skins WHERE user_id = $1 AND is_equipped = TRUE',
-      [userId]
-    );
-    return row?.skin_id ?? 'classic';
+    const doc = await UserSkinModel.findOne({
+      user_id:     new Types.ObjectId(userId),
+      is_equipped: true,
+    });
+    return doc?.skin_id ?? 'classic';
   }
 
   /** Check ELO-gated skins and auto-grant them to a user. */
   static async checkEloUnlocks(userId: string, elo: number): Promise<string[]> {
-    const eligible = await db.any<{ id: string }>(
-      `SELECT s.id
-         FROM skins s
-        WHERE s.is_active = TRUE
-          AND s.min_elo > 0
-          AND s.min_elo <= $1
-          AND NOT EXISTS (
-            SELECT 1 FROM user_skins us
-             WHERE us.user_id = $2 AND us.skin_id = s.id
-          )`,
-      [elo, userId]
-    );
+    const uid = new Types.ObjectId(userId);
+    const ownedIds = (await UserSkinModel.find({ user_id: uid }).select('skin_id'))
+      .map((us) => us.skin_id);
+
+    const eligible = await SkinModel.find({
+      is_active: true,
+      min_elo:   { $gt: 0, $lte: elo },
+      _id:       { $nin: ownedIds },
+    }).select('_id');
 
     for (const s of eligible) {
-      await SkinRepository.grant(userId, s.id);
+      await SkinRepository.grant(userId, s._id as string);
     }
-    return eligible.map((s) => s.id);
+    return eligible.map((s) => s._id as string);
   }
 
   /** Return the skin definition by id. */
   static async getById(skinId: string): Promise<SkinRecord | null> {
-    return db.oneOrNone('SELECT * FROM skins WHERE id = $1', [skinId]);
+    const doc = await SkinModel.findById(skinId);
+    return doc ? toSkinRecord(doc.toJSON()) : null;
   }
 }
+

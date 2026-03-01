@@ -1,87 +1,103 @@
-import { db } from '../database/connection';
+import { Types } from 'mongoose';
+import { UserModel, GameHistoryModel } from '../database/models';
 import { PlayerAnalytics } from '../types';
 
 export class AnalyticsService {
   /** Full player analytics aggregate. */
   static async getPlayerAnalytics(userId: string): Promise<PlayerAnalytics | null> {
-    const user = await db.oneOrNone<{
-      id: string; username: string; elo_rating: number; games_played: number;
-    }>(
-      'SELECT id, username, elo_rating, games_played FROM users WHERE id = $1',
-      [userId]
-    );
-    if (!user) return null;
+    let uid: Types.ObjectId;
+    try { uid = new Types.ObjectId(userId); } catch { return null; }
 
-    const [stats, eloHistory, scoreHistory, powerups] = await Promise.all([
-      // Aggregate stats
-      db.one<{
-        total_games: string; avg_score: string; best_score: string;
-        avg_rank: string; win_rate: string; avg_duration_ms: string;
-      }>(
-        `SELECT
-            COUNT(*)                                  AS total_games,
-            COALESCE(AVG(score), 0)                   AS avg_score,
-            COALESCE(MAX(score), 0)                   AS best_score,
-            COALESCE(AVG(rank), 0)                    AS avg_rank,
-            COALESCE(
-              SUM(CASE WHEN rank = 1 THEN 1 ELSE 0 END)::FLOAT
-              / NULLIF(COUNT(*), 0), 0
-            )                                         AS win_rate,
-            COALESCE(AVG(duration_ms), 0)             AS avg_duration_ms
-           FROM game_history
-          WHERE user_id = $1`,
-        [userId]
-      ),
+    const userDoc = await UserModel.findById(uid).select('id username elo_rating games_played');
+    if (!userDoc) return null;
+    const uj = userDoc.toJSON() as Record<string, unknown>;
 
-      // ELO over time (last 30 entries)
-      db.any<{ date: string; elo: number }>(
-        `SELECT TO_CHAR(created_at, 'YYYY-MM-DD') AS date,
-                elo_after AS elo
-           FROM game_history
-          WHERE user_id = $1 AND elo_after IS NOT NULL
-          ORDER BY created_at
-          LIMIT 30`,
-        [userId]
-      ),
-
-      // Score per game (last 30)
-      db.any<{ date: string; score: number }>(
-        `SELECT TO_CHAR(created_at, 'YYYY-MM-DD') AS date, score
-           FROM game_history
-          WHERE user_id = $1
-          ORDER BY created_at DESC
-          LIMIT 30`,
-        [userId]
-      ),
-
-      // Power-up frequency aggregation
-      db.one<{ powerups_collected: Record<string, number> | null }>(
-        `SELECT
-            jsonb_object_agg(key, total) AS powerups_collected
-           FROM (
-             SELECT key, SUM(value::int) AS total
-               FROM game_history,
-                    jsonb_each_text(COALESCE(powerups_collected, '{}'))
-              WHERE user_id = $1
-              GROUP BY key
-           ) sub`,
-        [userId]
-      ).catch(() => ({ powerups_collected: null })),
+    // ── Aggregate stats ──────────────────────────────────────
+    const [statsAgg, historyDocs, scoreHistDocs] = await Promise.all([
+      GameHistoryModel.aggregate([
+        { $match: { user_id: uid } },
+        {
+          $group: {
+            _id:           null,
+            total_games:   { $sum: 1 },
+            avg_score:     { $avg: '$score' },
+            best_score:    { $max: '$score' },
+            avg_rank:      { $avg: '$rank' },
+            win_count:     { $sum: { $cond: [{ $eq: ['$rank', 1] }, 1, 0] } },
+            avg_duration:  { $avg: '$duration_ms' },
+          },
+        },
+      ]),
+      // ELO history (last 30 entries with elo_after)
+      GameHistoryModel.find({ user_id: uid, elo_after: { $ne: null } })
+        .sort({ created_at: 1 })
+        .limit(30)
+        .select('created_at elo_after'),
+      // Score history (last 30)
+      GameHistoryModel.find({ user_id: uid })
+        .sort({ created_at: -1 })
+        .limit(30)
+        .select('created_at score'),
     ]);
+
+    const stats = statsAgg[0] ?? {
+      total_games: 0, avg_score: 0, best_score: 0,
+      avg_rank: 0, win_count: 0, avg_duration: 0,
+    };
+    const totalGames = stats.total_games as number;
+
+    // ── Power-up frequency ────────────────────────────────────
+    const powerupAgg = await GameHistoryModel.aggregate([
+      { $match: { user_id: uid } },
+      { $project: { powerups_collected: 1 } },
+      {
+        $group: {
+          _id: null,
+          allPowerups: { $push: '$powerups_collected' },
+        },
+      },
+    ]);
+    const powerupFrequency: Record<string, number> = {};
+    if (powerupAgg[0]) {
+      for (const map of (powerupAgg[0].allPowerups as Record<string, number>[])) {
+        if (!map) continue;
+        for (const [k, v] of Object.entries(map)) {
+          powerupFrequency[k] = (powerupFrequency[k] ?? 0) + (v ?? 0);
+        }
+      }
+    }
+
+    const eloHistory = historyDocs.map((d) => {
+      const j = d.toJSON() as Record<string, unknown>;
+      return {
+        date: (j['created_at'] as Date).toISOString().slice(0, 10),
+        elo:  j['elo_after'] as number,
+      };
+    });
+
+    const scoreHistory = scoreHistDocs.map((d) => {
+      const j = d.toJSON() as Record<string, unknown>;
+      return {
+        date:  (j['created_at'] as Date).toISOString().slice(0, 10),
+        score: j['score'] as number,
+      };
+    });
 
     return {
       userId,
-      username:         user.username,
-      totalGames:       parseInt(stats.total_games),
-      avgScore:         Math.round(parseFloat(stats.avg_score) * 10) / 10,
-      bestScore:        parseInt(stats.best_score),
-      avgRank:          Math.round(parseFloat(stats.avg_rank) * 10) / 10,
-      winRate:          Math.round(parseFloat(stats.win_rate) * 1000) / 10,
-      avgDurationMs:    Math.round(parseFloat(stats.avg_duration_ms)),
-      currentElo:       user.elo_rating,
-      eloHistory:       eloHistory.reverse(),
+      username:        uj['username'] as string,
+      totalGames,
+      avgScore:        Math.round(((stats.avg_score as number) ?? 0) * 10) / 10,
+      bestScore:       (stats.best_score as number) ?? 0,
+      avgRank:         Math.round(((stats.avg_rank as number) ?? 0) * 10) / 10,
+      winRate:         totalGames > 0
+        ? Math.round(((stats.win_count as number) / totalGames) * 1000) / 10
+        : 0,
+      avgDurationMs:   Math.round((stats.avg_duration as number) ?? 0),
+      currentElo:      uj['elo_rating'] as number,
+      eloHistory:      eloHistory.reverse(),
       scoreHistory,
-      powerupFrequency: powerups.powerups_collected ?? {},
+      powerupFrequency,
     };
   }
 
@@ -90,33 +106,52 @@ export class AnalyticsService {
     sortBy: 'high_score' | 'elo' = 'high_score',
     limit = 100
   ) {
-    const col = sortBy === 'elo' ? 'elo_rating' : 'high_score';
-    return db.any(
-      `SELECT id AS "userId", username, avatar, high_score AS "highScore",
-              elo_rating AS elo, games_played AS "gamesPlayed",
-              RANK() OVER (ORDER BY ${col} DESC) AS rank
-         FROM users
-        ORDER BY ${col} DESC
-        LIMIT $1`,
-      [limit]
-    );
+    const sortField = sortBy === 'elo' ? 'elo_rating' : 'high_score';
+    const users = await UserModel.find()
+      .sort({ [sortField]: -1 })
+      .limit(limit)
+      .select('id username avatar high_score elo_rating games_played');
+
+    return users.map((u, idx) => {
+      const j = u.toJSON() as Record<string, unknown>;
+      return {
+        userId:      String(j['id']),
+        username:    j['username'] as string,
+        avatar:      (j['avatar'] as string) ?? null,
+        highScore:   j['high_score'] as number,
+        elo:         j['elo_rating'] as number,
+        gamesPlayed: j['games_played'] as number,
+        rank:        idx + 1,
+      };
+    });
   }
 
   /** Match history for a user with ELO deltas. */
   static async getMatchHistory(userId: string, limit = 20, offset = 0) {
-    return db.any(
-      `SELECT gh.id, gh.room_id AS "roomId", gh.score, gh.rank,
-              gh.total_players AS "totalPlayers",
-              gh.duration_ms AS "durationMs",
-              gh.elo_before AS "eloBefore", gh.elo_after AS "eloAfter",
-              gh.elo_change AS "eloChange",
-              gh.powerups_collected AS "powerupsCollected",
-              gh.created_at AS "createdAt"
-         FROM game_history gh
-        WHERE gh.user_id = $1
-        ORDER BY gh.created_at DESC
-        LIMIT $2 OFFSET $3`,
-      [userId, limit, offset]
-    );
+    let uid: Types.ObjectId;
+    try { uid = new Types.ObjectId(userId); } catch { return []; }
+
+    const docs = await GameHistoryModel.find({ user_id: uid })
+      .sort({ created_at: -1 })
+      .skip(offset)
+      .limit(limit);
+
+    return docs.map((d) => {
+      const j = d.toJSON() as Record<string, unknown>;
+      return {
+        id:                String(j['id']),
+        roomId:            j['room_id'],
+        score:             j['score'],
+        rank:              j['rank'],
+        totalPlayers:      j['total_players'],
+        durationMs:        j['duration_ms'],
+        eloBefore:         j['elo_before'],
+        eloAfter:          j['elo_after'],
+        eloChange:         j['elo_change'],
+        powerupsCollected: j['powerups_collected'],
+        createdAt:         j['created_at'],
+      };
+    });
   }
 }
+

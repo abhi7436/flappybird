@@ -1,95 +1,36 @@
 #!/usr/bin/env node
 /**
- * Sets up local PostgreSQL for development:
- *  - Creates the `postgres` role (if missing)
- *  - Creates the `flappybirds` database (if missing)
- *  - Runs the schema migration
+ * Verifies local MongoDB is reachable for development.
+ * No schema migration needed — Mongoose creates collections/indexes
+ * automatically on first use, and skins are seeded at server start.
  *
- * Connects as the current OS user (no password required on Homebrew installs).
+ * Usage:  node scripts/setup-local-db.js
  */
-const { Client } = require('pg');
-const fs = require('fs');
-const path = require('path');
+const { MongoClient } = require('mongodb');
+
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/flappybirds';
 
 async function run() {
-  // ── Step 1: connect as OS user to the default 'postgres' db ─
-  const admin = new Client({ host: 'localhost', port: 5432, database: 'postgres' });
-  await admin.connect();
-  console.log('✔ Connected to local PostgreSQL as', admin.user ?? process.env.USER);
+  const client = new MongoClient(MONGODB_URI, { serverSelectionTimeoutMS: 5000 });
 
-  // Create `postgres` role if it doesn't exist
-  await admin.query(`
-    DO $$
-    BEGIN
-      IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'postgres') THEN
-        CREATE ROLE postgres WITH LOGIN SUPERUSER PASSWORD 'postgres';
-        RAISE NOTICE 'Created role: postgres';
-      END IF;
-    END
-    $$;
-  `);
-  console.log('✔ Role "postgres" exists.');
-
-  // Create `flappybirds` database if it doesn't exist
-  const { rows } = await admin.query(
-    "SELECT 1 FROM pg_database WHERE datname = 'flappybirds'"
-  );
-  if (rows.length === 0) {
-    await admin.query('CREATE DATABASE flappybirds OWNER postgres');
-    console.log('✔ Created database: flappybirds');
-  } else {
-    console.log('✔ Database "flappybirds" already exists.');
+  try {
+    await client.connect();
+    await client.db().admin().ping();
+    console.log('✔ Connected to MongoDB at', MONGODB_URI);
+    console.log('✔ Collections and indexes will be created automatically by Mongoose on first run.');
+    console.log('✔ Skin seed data will be inserted on server start if the skins collection is empty.');
+    console.log('\n✔ Local database ready. You can now run ./start.sh\n');
+  } catch (err) {
+    console.error('✖ Could not connect to MongoDB:', err.message);
+    console.error('  Make sure MongoDB is running:');
+    console.error('    brew services start mongodb-community   (macOS)');
+    console.error('    sudo systemctl start mongod              (Linux)');
+    console.error('    docker run -p 27017:27017 mongo:7        (Docker)');
+    process.exit(1);
+  } finally {
+    await client.close();
   }
-  await admin.end();
-
-  // ── Step 2: connect as postgres to flappybirds and run schema ─
-  const app = new Client({
-    host:     'localhost',
-    port:     5432,
-    user:     'postgres',
-    password: 'postgres',
-    database: 'flappybirds',
-  });
-  await app.connect();
-
-  const schemaPath = path.join(__dirname, '..', 'src', 'server', 'database', 'schema.sql');
-  const migrationPath = path.join(__dirname, '..', 'src', 'server', 'database', 'migrations', '002_advanced_features.sql');
-
-  // Check if schema is already applied (users table exists)
-  const { rows: tables } = await app.query(
-    "SELECT 1 FROM information_schema.tables WHERE table_name = 'users' AND table_schema = 'public'"
-  );
-
-  if (tables.length === 0) {
-    if (fs.existsSync(schemaPath)) {
-      const sql = fs.readFileSync(schemaPath, 'utf8');
-      await app.query(sql);
-      console.log('✔ Schema applied:', schemaPath);
-    }
-  } else {
-    console.log('✔ Schema already applied, skipping.');
-  }
-
-  // Always try migration but ignore "already exists" errors
-  if (fs.existsSync(migrationPath)) {
-    try {
-      const sql = fs.readFileSync(migrationPath, 'utf8');
-      await app.query(sql);
-      console.log('✔ Migration applied:', migrationPath);
-    } catch (err) {
-      if (err.code === '42P07' || err.code === '42710' || err.code === '42701' || err.message.includes('already exists')) {
-        console.log('✔ Migration already applied, skipping.');
-      } else {
-        throw err;
-      }
-    }
-  }
-
-  await app.end();
-  console.log('\n✔ Local database ready. You can now run ./start.sh\n');
 }
 
-run().catch(err => {
-  console.error('✖ Setup failed:', err.message);
-  process.exit(1);
-});
+run();
+

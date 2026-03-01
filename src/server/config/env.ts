@@ -16,7 +16,8 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3001),
 
   // ── Database ─────────────────────────────────────────────
-  DATABASE_URL: z.string().url(),
+  // MongoDB connection string, e.g. mongodb://user:pass@host:27017/flappybirds
+  MONGODB_URI: z.string().url(),
 
   // ── Redis ─────────────────────────────────────────────────
   REDIS_URL: z.string().url().default('redis://localhost:6379'),
