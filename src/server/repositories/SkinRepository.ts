@@ -1,36 +1,42 @@
-import { db } from '../database/connection';
+import { getDb } from '../database/connection';
 import { SkinRecord, UserSkinRecord, SkinWithOwnership } from '../types';
 
 export class SkinRepository {
   /** Fetch all active skins with ownership status for a given user. */
   static async getAllWithOwnership(userId: string): Promise<SkinWithOwnership[]> {
-    return db.any<SkinWithOwnership>(
-      `SELECT s.*,
-              (us.skin_id IS NOT NULL)              AS owned,
-              (us.is_equipped IS TRUE)              AS equipped
-         FROM skins s
-         LEFT JOIN user_skins us ON us.skin_id = s.id AND us.user_id = $1
-        WHERE s.is_active = TRUE
-        ORDER BY s.rarity DESC, s.name`,
-      [userId]
-    );
+    const db = getDb();
+    const skins = await db.collection('skins').aggregate([
+      { $match: { is_active: true } },
+      { $lookup: {
+          from: 'user_skins',
+          let: { skinId: '$id' },
+          pipeline: [
+            { $match: { $expr: { $and: [ { $eq: ['$skin_id', '$$skinId'] }, { $eq: ['$user_id', userId] } ] } } },
+          ],
+          as: 'ownership'
+        }
+      },
+      { $addFields: { owned: { $gt: [ { $size: '$ownership' }, 0 ] }, equipped: { $gt: [ { $size: { $filter: { input: '$ownership', as: 'o', cond: { $eq: ['$$o.is_equipped', true] } } } }, 0 ] } } },
+      { $project: { ownership: 0 } },
+      { $sort: { rarity: -1, name: 1 } },
+    ]).toArray() as Promise<SkinWithOwnership[]>;
+    return skins;
   }
 
   /** Return all skins owned by a user. */
   static async getOwned(userId: string): Promise<UserSkinRecord[]> {
-    return db.any(
-      `SELECT * FROM user_skins WHERE user_id = $1 ORDER BY unlocked_at`,
-      [userId]
-    );
+    const db = getDb();
+    return db.collection('user_skins').find({ user_id: userId }).sort({ unlocked_at: 1 }).toArray() as Promise<UserSkinRecord[]>;
   }
 
   /** Grant a skin to a user (idempotent — safe to call multiple times). */
   static async grant(userId: string, skinId: string): Promise<void> {
-    await db.none(
-      `INSERT INTO user_skins (user_id, skin_id)
-       VALUES ($1, $2)
-       ON CONFLICT (user_id, skin_id) DO NOTHING`,
-      [userId, skinId]
+    const db = getDb();
+    // Idempotent grant
+    await db.collection('user_skins').updateOne(
+      { user_id: userId, skin_id: skinId },
+      { $setOnInsert: { user_id: userId, skin_id: skinId, unlocked_at: new Date(), is_equipped: false } },
+      { upsert: true }
     );
   }
 
@@ -40,53 +46,42 @@ export class SkinRepository {
    * Throws if the user does not own the skin.
    */
   static async equip(userId: string, skinId: string): Promise<void> {
-    const owns = await db.oneOrNone(
-      'SELECT 1 FROM user_skins WHERE user_id = $1 AND skin_id = $2',
-      [userId, skinId]
-    );
-    if (!owns) throw new Error('SKIN_NOT_OWNED');
+    const db = getDb();
+    const own = await db.collection('user_skins').findOne({ user_id: userId, skin_id: skinId });
+    if (!own) throw new Error('SKIN_NOT_OWNED');
 
-    await db.tx(async (t) => {
-      await t.none('UPDATE user_skins SET is_equipped = FALSE WHERE user_id = $1', [userId]);
-      await t.none(
-        'UPDATE user_skins SET is_equipped = TRUE WHERE user_id = $1 AND skin_id = $2',
-        [userId, skinId]
-      );
-    });
+    // Un-equip all then equip chosen skin
+    await db.collection('user_skins').updateMany({ user_id: userId }, { $set: { is_equipped: false } });
+    await db.collection('user_skins').updateOne({ user_id: userId, skin_id: skinId }, { $set: { is_equipped: true } });
   }
 
   /** Returns the currently equipped skin id (or 'classic' as fallback). */
   static async getEquipped(userId: string): Promise<string> {
-    const row = await db.oneOrNone<{ skin_id: string }>(
-      'SELECT skin_id FROM user_skins WHERE user_id = $1 AND is_equipped = TRUE',
-      [userId]
-    );
+    const db = getDb();
+    const row = await db.collection('user_skins').findOne({ user_id: userId, is_equipped: true });
     return row?.skin_id ?? 'classic';
   }
 
   /** Check ELO-gated skins and auto-grant them to a user. */
   static async checkEloUnlocks(userId: string, elo: number): Promise<string[]> {
-    const eligible = await db.any<{ id: string }>(
-      `SELECT s.id
-         FROM skins s
-        WHERE s.is_active = TRUE
-          AND s.min_elo > 0
-          AND s.min_elo <= $1
-          AND NOT EXISTS (
-            SELECT 1 FROM user_skins us
-             WHERE us.user_id = $2 AND us.skin_id = s.id
-          )`,
-      [elo, userId]
-    );
-
-    for (const s of eligible) {
-      await SkinRepository.grant(userId, s.id);
+    const db = getDb();
+    const owned = await db.collection('user_skins').find({ user_id: userId }).project({ skin_id: 1 }).toArray();
+    const ownedIds = new Set(owned.map((o: any) => o.skin_id));
+    const candidates = await db.collection('skins').find({ is_active: true, min_elo: { $gt: 0, $lte: elo } }).toArray();
+    const eligible: string[] = [];
+    for (const s of candidates) {
+      if (!ownedIds.has(s.id)) {
+        await SkinRepository.grant(userId, s.id);
+        eligible.push(s.id);
+      }
     }
-    return eligible.map((s) => s.id);
+    return eligible;
   }
 
   /** Return the skin definition by id. */
   static async getById(skinId: string): Promise<SkinRecord | null> {
-    return db.oneOrNone('SELECT * FROM skins WHERE id = $1', [skinId]);
+    const db = getDb();
+    const doc = await db.collection('skins').findOne({ id: skinId });
+    return (doc as unknown as SkinRecord) ?? null;
   }
 }

@@ -20,12 +20,12 @@ cd web && npm install && cd ..
 
 # 2. Configure environment
 cp .env.example .env
-# Edit .env — set DATABASE_URL, REDIS_URL, JWT_SECRET
+# Edit `.env` — set MongoDB, Redis and JWT values
 
-# 3. Start infrastructure (Postgres + Redis only)
-docker compose up db redis -d
+# 3. Start infrastructure (MongoDB + Redis)
+docker compose up mongo redis -d
 
-# 4. Run DB migrations
+# 4. Initialize MongoDB (create indexes)
 npm run db:migrate
 
 # 5. Start the API server (hot-reload)
@@ -51,7 +51,7 @@ cd flappy-birds-multiplayer
 cp .env.example .env
 ```
 
-Edit `.env` and fill in every required value:
+Edit `.env` and fill in every required value (Mongo-specific):
 
 ```bash
 # Generate a strong JWT secret
@@ -59,7 +59,8 @@ openssl rand -hex 32
 
 # Required variables
 JWT_SECRET=<output from above>
-POSTGRES_PASSWORD=<strong password>
+MONGODB_URI=mongodb://mongo:27017
+MONGODB_DB_NAME=flappybird
 CORS_ORIGIN=https://play.yourdomain.com
 FRONTEND_URL=https://play.yourdomain.com
 VITE_API_URL=https://play.yourdomain.com
@@ -88,15 +89,15 @@ docker compose -f docker-compose.prod.yml up -d --build
 ### 4. Apply database migrations
 
 ```bash
-docker compose -f docker-compose.prod.yml exec app1 \
-  node -e "require('child_process').execSync('psql \$DATABASE_URL -f /app/dist/server/database/schema.sql', {stdio:'inherit'})"
-```
+  docker compose -f docker-compose.prod.yml exec app1 \
+    node -e "require('child_process').execSync('node /app/scripts/init-mongo.js', {stdio:'inherit'})"
 
-Or connect directly:
+Or initialize directly against the Mongo container:
 
 ```bash
-docker compose -f docker-compose.prod.yml exec db \
-  psql -U postgres flappybirds -f /docker-entrypoint-initdb.d/schema.sql
+docker compose -f docker-compose.prod.yml exec mongo \
+  node /app/scripts/init-mongo.js
+```
 ```
 
 ### 5. Verify health
@@ -197,9 +198,9 @@ Compose will rebuild only changed images and perform a rolling restart.
 ## Backup
 
 ```bash
-# Postgres
-docker compose -f docker-compose.prod.yml exec db \
-  pg_dump -U postgres flappybirds > backup_$(date +%Y%m%d).sql
+# MongoDB (use mongodump)
+docker compose -f docker-compose.prod.yml exec mongo \
+  mongodump --archive=/data/backup/mongo_$(date +%Y%m%d).gz --gzip --db=flappybird
 
 # Redis (AOF is already persisted in the redis_data volume)
 docker compose -f docker-compose.prod.yml exec redis \

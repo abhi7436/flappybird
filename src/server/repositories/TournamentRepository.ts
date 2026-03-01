@@ -1,4 +1,4 @@
-import { db } from '../database/connection';
+import { getDb } from '../database/connection';
 import {
   TournamentRecord,
   TournamentDetail,
@@ -22,49 +22,61 @@ export interface CreateTournamentInput {
 export class TournamentRepository {
   static async create(input: CreateTournamentInput): Promise<TournamentRecord> {
     const roundsTotal = Math.ceil(Math.log2(input.maxParticipants));
-    return db.one(
-      `INSERT INTO tournaments
-         (name, description, bracket_type, max_participants, rounds_total, starts_at, prize_info, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       RETURNING *`,
-      [
-        input.name, input.description ?? null, input.bracketType,
-        input.maxParticipants, roundsTotal, input.startsAt,
-        input.prizeInfo ?? null, input.createdBy,
-      ]
-    );
+    const db = getDb();
+    const now = new Date();
+    const doc = {
+      name: input.name,
+      description: input.description ?? null,
+      bracket_type: input.bracketType,
+      max_participants: input.maxParticipants,
+      rounds_total: roundsTotal,
+      current_round: 0,
+      prize_info: input.prizeInfo ?? null,
+      created_by: input.createdBy,
+      starts_at: input.startsAt,
+      ended_at: null,
+      status: 'registration',
+      created_at: now,
+      updated_at: now,
+    } as any;
+    const res = await db.collection('tournaments').insertOne(doc);
+    doc.id = res.insertedId.toHexString();
+    return doc as TournamentRecord;
   }
 
   static async getById(id: string): Promise<TournamentDetail | null> {
-    const tournament = await db.oneOrNone<TournamentRecord>(
-      'SELECT * FROM tournaments WHERE id = $1',
-      [id]
-    );
+    const db = getDb();
+    const tournament = await db.collection('tournaments').findOne({ id });
     if (!tournament) return null;
 
-    const [participants, matches] = await Promise.all([
-      db.any<TournamentParticipant>(
-        `SELECT tp.*, u.username, u.avatar
-           FROM tournament_participants tp
-           JOIN users u ON u.id = tp.user_id
-          WHERE tp.tournament_id = $1
-          ORDER BY tp.seed NULLS LAST, tp.created_at`,
-        [id]
-      ),
-      db.any<TournamentMatch>(
-        `SELECT tm.*,
-                p1.username AS "player1Username", p1.avatar AS "player1Avatar",
-                p2.username AS "player2Username", p2.avatar AS "player2Avatar",
-                w.username  AS "winnerUsername"
-           FROM tournament_matches tm
-           LEFT JOIN users p1 ON p1.id = tm.player1_id
-           LEFT JOIN users p2 ON p2.id = tm.player2_id
-           LEFT JOIN users w  ON w.id  = tm.winner_id
-          WHERE tm.tournament_id = $1
-          ORDER BY tm.round_number, tm.match_number`,
-        [id]
-      ),
-    ]);
+    const participants = await db.collection('tournament_participants').aggregate([
+      { $match: { tournament_id: id } },
+      { $lookup: { from: 'users', localField: 'user_id', foreignField: 'id', as: 'user' } },
+      { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
+      { $addFields: { username: '$user.username', avatar: '$user.avatar' } },
+      { $project: { user: 0 } },
+      { $sort: { seed: 1, created_at: 1 } },
+    ]).toArray() as TournamentParticipant[];
+
+    const matches = await db.collection('tournament_matches').aggregate([
+      { $match: { tournament_id: id } },
+      { $lookup: { from: 'users', localField: 'player1_id', foreignField: 'id', as: 'p1' } },
+      { $lookup: { from: 'users', localField: 'player2_id', foreignField: 'id', as: 'p2' } },
+      { $lookup: { from: 'users', localField: 'winner_id', foreignField: 'id', as: 'w' } },
+      { $unwind: { path: '$p1', preserveNullAndEmptyArrays: true } },
+      { $unwind: { path: '$p2', preserveNullAndEmptyArrays: true } },
+      { $unwind: { path: '$w', preserveNullAndEmptyArrays: true } },
+      { $addFields: {
+          'player1.username': '$p1.username',
+          'player1.avatar': '$p1.avatar',
+          'player2.username': '$p2.username',
+          'player2.avatar': '$p2.avatar',
+          'winner.username': '$w.username',
+        }
+      },
+      { $project: { p1: 0, p2: 0, w: 0 } },
+      { $sort: { round_number: 1, match_number: 1 } },
+    ]).toArray() as TournamentMatch[];
 
     return {
       ...tournament,
@@ -75,63 +87,41 @@ export class TournamentRepository {
   }
 
   static async list(status?: TournamentStatus, limit = 20, offset = 0): Promise<TournamentRecord[]> {
-    if (status) {
-      return db.any(
-        `SELECT t.*, COUNT(tp.id) AS participant_count
-           FROM tournaments t
-      LEFT JOIN tournament_participants tp ON tp.tournament_id = t.id
-          WHERE t.status = $1
-          GROUP BY t.id
-          ORDER BY t.starts_at DESC
-          LIMIT $2 OFFSET $3`,
-        [status, limit, offset]
-      );
+    const db = getDb();
+    const cursor = status
+      ? db.collection('tournaments').find({ status })
+      : db.collection('tournaments').find();
+    const items = await cursor.sort({ starts_at: -1 }).skip(offset).limit(limit).toArray();
+    // Attach participant_count for each
+    for (const t of items) {
+      const count = await db.collection('tournament_participants').countDocuments({ tournament_id: t.id });
+      (t as any).participant_count = count;
     }
-    return db.any(
-      `SELECT t.*, COUNT(tp.id) AS participant_count
-         FROM tournaments t
-    LEFT JOIN tournament_participants tp ON tp.tournament_id = t.id
-        GROUP BY t.id
-        ORDER BY t.starts_at DESC
-        LIMIT $1 OFFSET $2`,
-      [limit, offset]
-    );
+    return items as TournamentRecord[];
   }
 
   static async register(tournamentId: string, userId: string, elo: number): Promise<void> {
     // Enforce capacity
-    const { count } = await db.one<{ count: string }>(
-      'SELECT COUNT(*) FROM tournament_participants WHERE tournament_id = $1',
-      [tournamentId]
-    );
-    const { max_participants } = await db.one<{ max_participants: number }>(
-      'SELECT max_participants FROM tournaments WHERE id = $1',
-      [tournamentId]
-    );
-    if (parseInt(count) >= max_participants) throw new Error('TOURNAMENT_FULL');
-
-    await db.none(
-      `INSERT INTO tournament_participants (tournament_id, user_id, elo_at_entry)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (tournament_id, user_id) DO NOTHING`,
-      [tournamentId, userId, elo]
+    const db = getDb();
+    const count = await db.collection('tournament_participants').countDocuments({ tournament_id: tournamentId });
+    const tournament = await db.collection('tournaments').findOne({ id: tournamentId });
+    if (!tournament) throw new Error('TOURNAMENT_NOT_FOUND');
+    if (count >= (tournament.max_participants ?? 0)) throw new Error('TOURNAMENT_FULL');
+    await db.collection('tournament_participants').updateOne(
+      { tournament_id: tournamentId, user_id: userId },
+      { $setOnInsert: { tournament_id: tournamentId, user_id: userId, username: null, avatar: null, elo_at_entry: elo, seed: null, eliminated_round: null, final_placement: null, created_at: new Date() } },
+      { upsert: true }
     );
   }
 
   static async updateStatus(id: string, status: TournamentStatus): Promise<void> {
-    await db.none(
-      `UPDATE tournaments SET status = $1, updated_at = NOW()
-        WHERE id = $2`,
-      [status, id]
-    );
+    const db = getDb();
+    await db.collection('tournaments').updateOne({ id }, { $set: { status, updated_at: new Date() } });
   }
 
   static async advanceRound(tournamentId: string): Promise<void> {
-    await db.none(
-      `UPDATE tournaments SET current_round = current_round + 1, updated_at = NOW()
-        WHERE id = $1`,
-      [tournamentId]
-    );
+    const db = getDb();
+    await db.collection('tournaments').updateOne({ id: tournamentId }, { $inc: { current_round: 1 }, $set: { updated_at: new Date() } });
   }
 
   static async saveMatchResult(
@@ -140,13 +130,8 @@ export class TournamentRepository {
     p1Score: number,
     p2Score: number
   ): Promise<void> {
-    await db.none(
-      `UPDATE tournament_matches
-          SET winner_id = $1, player1_score = $2, player2_score = $3,
-              status = 'completed', completed_at = NOW()
-        WHERE id = $4`,
-      [winnerId, p1Score, p2Score, matchId]
-    );
+    const db = getDb();
+    await db.collection('tournament_matches').updateOne({ id: matchId }, { $set: { winner_id: winnerId, player1_score: p1Score, player2_score: p2Score, status: 'completed', completed_at: new Date() } });
   }
 
   static async createMatch(
@@ -156,15 +141,19 @@ export class TournamentRepository {
     player1Id: string | null,
     player2Id: string | null
   ): Promise<TournamentMatch> {
-    return db.one(
-      `INSERT INTO tournament_matches
-         (tournament_id, round_number, match_number, player1_id, player2_id, status)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING *`,
-      [
-        tournamentId, roundNumber, matchNumber, player1Id, player2Id,
-        player2Id === null ? 'bye' : 'pending',
-      ]
-    );
+    const db = getDb();
+    const doc = {
+      tournament_id: tournamentId,
+      round_number: roundNumber,
+      match_number: matchNumber,
+      player1_id: player1Id,
+      player2_id: player2Id,
+      status: player2Id === null ? 'bye' : 'pending',
+      scheduled_at: null,
+      completed_at: null,
+    } as any;
+    const res = await db.collection('tournament_matches').insertOne(doc);
+    doc.id = res.insertedId.toHexString();
+    return doc as TournamentMatch;
   }
 }

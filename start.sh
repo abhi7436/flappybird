@@ -8,8 +8,8 @@
 #    ./start.sh all      # server + web + Expo (no Docker)
 #    ./start.sh stop     # stop all background processes
 #
-#  Assumes PostgreSQL (:5432) and Redis (:6379) are already
-#  running locally (e.g. via Homebrew: brew services start postgresql redis)
+#  Assumes MongoDB (:27017) and Redis (:6379) are already
+#  running locally (e.g. via Homebrew: brew services start mongodb-community redis)
 # ─────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -58,11 +58,11 @@ if [[ ! -f "$ROOT/.env" ]]; then
   warn "Edit $ROOT/.env before deploying to production!"
 fi
 
-# ── Check local Postgres + Redis ─────────────────────────────
-info "Checking local PostgreSQL on :5432…"
-nc -z localhost 5432 2>/dev/null \
-  && success "PostgreSQL is reachable." \
-  || die "PostgreSQL is not running on :5432.\n   Start it with: brew services start postgresql@16  (or your local equivalent)"
+# ── Check local MongoDB + Redis ──────────────────────────────
+info "Checking local MongoDB on :27017…"
+nc -z localhost 27017 2>/dev/null \
+  && success "MongoDB is reachable." \
+  || die "MongoDB is not running on :27017.\n   Start it with: brew services start mongodb-community  (or your local equivalent)"
 
 info "Checking local Redis on :6379…"
 nc -z localhost 6379 2>/dev/null \

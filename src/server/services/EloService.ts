@@ -7,7 +7,7 @@
 // so every game produces a single meaningful delta.
 // ============================================================
 
-import { db } from '../database/connection';
+import { getDb } from '../database/connection';
 import { EloChangeResult } from '../types';
 
 interface PlayerResult {
@@ -56,11 +56,8 @@ export class EloService {
 
     // Fetch current ratings in one query
     const userIds = results.map((r) => r.userId);
-    const rows = await db.any<{ id: string; elo_rating: number; games_played: number }>(
-      'SELECT id, elo_rating, games_played FROM users WHERE id = ANY($1)',
-      [userIds]
-    );
-
+    const db = getDb();
+    const rows = await db.collection('users').find({ id: { $in: userIds } }).project({ id: 1, elo_rating: 1, games_played: 1 }).toArray();
     const ratingMap = new Map<string, { elo: number; games: number }>();
     for (const row of rows) {
       ratingMap.set(row.id, { elo: row.elo_rating, games: row.games_played });
@@ -84,19 +81,14 @@ export class EloService {
       changes.push({ userId: result.userId, oldElo: current.elo, newElo, delta });
     }
 
-    // Bulk-update in a transaction
-    await db.tx(async (t) => {
-      for (const c of changes) {
-        await t.none(
-          `UPDATE users
-             SET elo_rating   = $1,
-                 games_played = games_played + 1,
-                 updated_at   = NOW()
-           WHERE id = $2`,
-          [c.newElo, c.userId]
-        );
+    // Bulk update using bulkWrite
+    const ops = changes.map((c) => ({
+      updateOne: {
+        filter: { id: c.userId },
+        update: { $set: { elo_rating: c.newElo, updated_at: new Date() }, $inc: { games_played: 1 } },
       }
-    });
+    }));
+    if (ops.length > 0) await db.collection('users').bulkWrite(ops);
 
     return changes;
   }

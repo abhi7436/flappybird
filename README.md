@@ -22,7 +22,7 @@ Production-ready multiplayer Flappy Bird supporting up to **50 concurrent player
                      │
           ┌──────────┴──────────┐
           │                     │
-     PostgreSQL               Redis
+    MongoDB                  Redis
    (persistent storage)  (leaderboard cache
                           + pub/sub for
                           horizontal scaling)
@@ -44,8 +44,8 @@ src/
     ├── RoomManager.ts    # In-memory room state
     ├── WebSocketServer.ts# Socket.IO + anti-cheat + pub/sub
     ├── database/
-    │   ├── schema.sql    # PostgreSQL schema
-    │   ├── connection.ts # pg Pool
+    │   ├── init-mongo.js  # Create indexes + collection setup
+    │   ├── connection.ts  # Mongo client
     │   └── redisClient.ts
     ├── middleware/
     │   ├── authMiddleware.ts  # JWT sign/verify + Express guard
@@ -125,9 +125,9 @@ src/
 
 ## Database Schema
 
-See [src/server/database/schema.sql](src/server/database/schema.sql) for the full PostgreSQL schema.
+This project uses MongoDB collections. Indexes and initial setup are created by `scripts/init-mongo.js`.
 
-**Tables:** `users`, `friends`, `game_history`, `room_invites`
+**Collections:** `users`, `friends`, `game_history`, `room_invites`, `replays`, `skins`, `tournaments`
 
 ## Redis Schema
 
@@ -157,7 +157,7 @@ docker compose up -d
 
 # 3. Development (without Docker)
 npm install
-npm run db:migrate   # requires local Postgres + Redis
+npm run db:migrate   # requires local MongoDB + Redis
 npm run dev
 ```
 

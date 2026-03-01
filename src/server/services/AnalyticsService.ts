@@ -1,87 +1,53 @@
-import { db } from '../database/connection';
+import { getDb } from '../database/connection';
 import { PlayerAnalytics } from '../types';
 
 export class AnalyticsService {
   /** Full player analytics aggregate. */
   static async getPlayerAnalytics(userId: string): Promise<PlayerAnalytics | null> {
-    const user = await db.oneOrNone<{
-      id: string; username: string; elo_rating: number; games_played: number;
-    }>(
-      'SELECT id, username, elo_rating, games_played FROM users WHERE id = $1',
-      [userId]
-    );
+    const db = getDb();
+    const user = await db.collection('users').findOne({ id: userId }, { projection: { id: 1, username: 1, elo_rating: 1, games_played: 1 } });
     if (!user) return null;
 
-    const [stats, eloHistory, scoreHistory, powerups] = await Promise.all([
-      // Aggregate stats
-      db.one<{
-        total_games: string; avg_score: string; best_score: string;
-        avg_rank: string; win_rate: string; avg_duration_ms: string;
-      }>(
-        `SELECT
-            COUNT(*)                                  AS total_games,
-            COALESCE(AVG(score), 0)                   AS avg_score,
-            COALESCE(MAX(score), 0)                   AS best_score,
-            COALESCE(AVG(rank), 0)                    AS avg_rank,
-            COALESCE(
-              SUM(CASE WHEN rank = 1 THEN 1 ELSE 0 END)::FLOAT
-              / NULLIF(COUNT(*), 0), 0
-            )                                         AS win_rate,
-            COALESCE(AVG(duration_ms), 0)             AS avg_duration_ms
-           FROM game_history
-          WHERE user_id = $1`,
-        [userId]
-      ),
+    // Aggregate stats
+    const statsAgg = await db.collection('game_history').aggregate([
+      { $match: { user_id: userId } },
+      { $group: {
+          _id: null,
+          total_games: { $sum: 1 },
+          avg_score: { $avg: '$score' },
+          best_score: { $max: '$score' },
+          avg_rank: { $avg: '$rank' },
+          wins: { $sum: { $cond: [{ $eq: ['$rank', 1] }, 1, 0] } },
+          avg_duration_ms: { $avg: '$duration_ms' },
+        }
+      }
+    ]).toArray();
+    const stats = statsAgg[0] ?? { total_games: 0, avg_score: 0, best_score: 0, avg_rank: 0, wins: 0, avg_duration_ms: 0 };
 
-      // ELO over time (last 30 entries)
-      db.any<{ date: string; elo: number }>(
-        `SELECT TO_CHAR(created_at, 'YYYY-MM-DD') AS date,
-                elo_after AS elo
-           FROM game_history
-          WHERE user_id = $1 AND elo_after IS NOT NULL
-          ORDER BY created_at
-          LIMIT 30`,
-        [userId]
-      ),
+    const eloHistory = await db.collection('game_history').find({ user_id: userId, elo_after: { $ne: null } }).project({ created_at: 1, elo_after: 1 }).sort({ created_at: 1 }).limit(30).toArray();
+    const scoreHistory = await db.collection('game_history').find({ user_id: userId }).project({ created_at: 1, score: 1 }).sort({ created_at: -1 }).limit(30).toArray();
 
-      // Score per game (last 30)
-      db.any<{ date: string; score: number }>(
-        `SELECT TO_CHAR(created_at, 'YYYY-MM-DD') AS date, score
-           FROM game_history
-          WHERE user_id = $1
-          ORDER BY created_at DESC
-          LIMIT 30`,
-        [userId]
-      ),
-
-      // Power-up frequency aggregation
-      db.one<{ powerups_collected: Record<string, number> | null }>(
-        `SELECT
-            jsonb_object_agg(key, total) AS powerups_collected
-           FROM (
-             SELECT key, SUM(value::int) AS total
-               FROM game_history,
-                    jsonb_each_text(COALESCE(powerups_collected, '{}'))
-              WHERE user_id = $1
-              GROUP BY key
-           ) sub`,
-        [userId]
-      ).catch(() => ({ powerups_collected: null })),
-    ]);
+    // Aggregate powerups by summing keys across docs
+    const ph = await db.collection('game_history').find({ user_id: userId }).project({ powerups_collected: 1 }).toArray();
+    const powerupsMap: Record<string, number> = {};
+    for (const r of ph) {
+      const p = r.powerups_collected ?? {};
+      for (const k of Object.keys(p)) powerupsMap[k] = (powerupsMap[k] || 0) + Number(p[k] ?? 0);
+    }
 
     return {
       userId,
-      username:         user.username,
-      totalGames:       parseInt(stats.total_games),
-      avgScore:         Math.round(parseFloat(stats.avg_score) * 10) / 10,
-      bestScore:        parseInt(stats.best_score),
-      avgRank:          Math.round(parseFloat(stats.avg_rank) * 10) / 10,
-      winRate:          Math.round(parseFloat(stats.win_rate) * 1000) / 10,
-      avgDurationMs:    Math.round(parseFloat(stats.avg_duration_ms)),
-      currentElo:       user.elo_rating,
-      eloHistory:       eloHistory.reverse(),
-      scoreHistory,
-      powerupFrequency: powerups.powerups_collected ?? {},
+      username: user.username,
+      totalGames: Number(stats.total_games),
+      avgScore: Math.round((Number(stats.avg_score) || 0) * 10) / 10,
+      bestScore: Number(stats.best_score) || 0,
+      avgRank: Math.round((Number(stats.avg_rank) || 0) * 10) / 10,
+      winRate: Math.round(((Number(stats.wins) || 0) / (Number(stats.total_games) || 1)) * 1000) / 10,
+      avgDurationMs: Math.round(Number(stats.avg_duration_ms) || 0),
+      currentElo: user.elo_rating,
+      eloHistory: (eloHistory as any).map((e: any) => ({ date: e.created_at.toISOString().slice(0,10), elo: e.elo_after })),
+      scoreHistory: (scoreHistory as any).map((s: any) => ({ date: s.created_at.toISOString().slice(0,10), score: s.score })),
+      powerupFrequency: powerupsMap,
     };
   }
 
@@ -91,32 +57,15 @@ export class AnalyticsService {
     limit = 100
   ) {
     const col = sortBy === 'elo' ? 'elo_rating' : 'high_score';
-    return db.any(
-      `SELECT id AS "userId", username, avatar, high_score AS "highScore",
-              elo_rating AS elo, games_played AS "gamesPlayed",
-              RANK() OVER (ORDER BY ${col} DESC) AS rank
-         FROM users
-        ORDER BY ${col} DESC
-        LIMIT $1`,
-      [limit]
-    );
+    const db = getDb();
+    const users = await db.collection('users').find().project({ id: 1, username: 1, avatar: 1, high_score: 1, elo_rating: 1, games_played: 1 }).sort({ [col]: -1 }).limit(limit).toArray();
+    // Attach rank based on index
+    return users.map((u: any, idx: number) => ({ userId: u.id, username: u.username, avatar: u.avatar, highScore: u.high_score, elo: u.elo_rating, gamesPlayed: u.games_played, rank: idx + 1 }));
   }
 
   /** Match history for a user with ELO deltas. */
   static async getMatchHistory(userId: string, limit = 20, offset = 0) {
-    return db.any(
-      `SELECT gh.id, gh.room_id AS "roomId", gh.score, gh.rank,
-              gh.total_players AS "totalPlayers",
-              gh.duration_ms AS "durationMs",
-              gh.elo_before AS "eloBefore", gh.elo_after AS "eloAfter",
-              gh.elo_change AS "eloChange",
-              gh.powerups_collected AS "powerupsCollected",
-              gh.created_at AS "createdAt"
-         FROM game_history gh
-        WHERE gh.user_id = $1
-        ORDER BY gh.created_at DESC
-        LIMIT $2 OFFSET $3`,
-      [userId, limit, offset]
-    );
+    const db = getDb();
+    return db.collection('game_history').find({ user_id: userId }).project({ id: 1, room_id: 1, score: 1, rank: 1, total_players: 1, duration_ms: 1, elo_before: 1, elo_after: 1, elo_change: 1, powerups_collected: 1, created_at: 1 }).sort({ created_at: -1 }).skip(offset).limit(limit).toArray();
   }
 }

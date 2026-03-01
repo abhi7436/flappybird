@@ -7,7 +7,7 @@ import cookieParser from 'cookie-parser';
 
 import { config, allowedOrigins, isProd } from './config/env';
 import { connectRedis } from './database/redisClient';
-import { pool } from './database/connection';
+import { connectMongo, closeMongo } from './database/connection';
 import { initializeWebSocketServer } from './WebSocketServer';
 import {
   globalLimiter,
@@ -45,7 +45,7 @@ async function bootstrap(): Promise<void> {
   // ── Connect datastores ──────────────────────────────────
   await connectRedis();
   await connectRateLimitRedis();
-  await pool.query('SELECT 1'); // Verify DB connection
+  await connectMongo(); // Verify MongoDB connection
   console.log('[Server] Datastores connected');
 
   // ── Express app ─────────────────────────────────────────
@@ -123,7 +123,7 @@ async function bootstrap(): Promise<void> {
   const shutdown = async (signal: string): Promise<void> => {
     console.log(`[Server] ${signal} received — shutting down gracefully`);
     httpServer.close(async () => {
-      await pool.end();
+      await closeMongo();
       console.log('[Server] Closed');
       process.exit(0);
     });

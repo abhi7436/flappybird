@@ -1,4 +1,4 @@
-import { db } from '../database/connection';
+import { getDb } from '../database/connection';
 import { ReplayRecord } from '../types';
 import { ReplayData } from '../../game-engine/ReplayRecorder';
 
@@ -12,68 +12,67 @@ export interface SaveReplayInput {
 export class ReplayRepository {
   static async save(input: SaveReplayInput): Promise<ReplayRecord> {
     const { replay } = input;
-    return db.one(
-      `INSERT INTO replays
-         (room_id, user_id, final_score, final_rank, duration_ms, seed, events,
-          canvas_width, canvas_height, engine_version)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-       RETURNING *`,
-      [
-        input.roomId,
-        input.userId,
-        replay.finalScore,
-        input.finalRank,
-        replay.durationMs,
-        replay.seed,
-        JSON.stringify(replay.events),
-        replay.canvasWidth,
-        replay.canvasHeight,
-        replay.engineVersion,
-      ]
-    );
+    const db = getDb();
+    const now = new Date();
+    const doc = {
+      room_id: input.roomId,
+      user_id: input.userId,
+      final_score: replay.finalScore,
+      final_rank: input.finalRank,
+      duration_ms: replay.durationMs,
+      seed: replay.seed,
+      events: replay.events,
+      canvas_width: replay.canvasWidth,
+      canvas_height: replay.canvasHeight,
+      engine_version: replay.engineVersion,
+      created_at: now,
+    } as any;
+    const res = await db.collection('replays').insertOne(doc);
+    doc.id = res.insertedId.toHexString();
+    return doc as ReplayRecord;
   }
 
   static async getById(id: string): Promise<ReplayRecord | null> {
-    return db.oneOrNone('SELECT * FROM replays WHERE id = $1', [id]);
+    const db = getDb();
+    const doc = await db.collection('replays').findOne({ id });
+    return (doc as unknown as ReplayRecord) ?? null;
   }
 
   static async listByUser(userId: string, limit = 20, offset = 0): Promise<ReplayRecord[]> {
-    return db.any(
-      `SELECT * FROM replays
-        WHERE user_id = $1
-        ORDER BY created_at DESC
-        LIMIT $2 OFFSET $3`,
-      [userId, limit, offset]
-    );
+    const db = getDb();
+    return db.collection('replays')
+      .find({ user_id: userId })
+      .sort({ created_at: -1 })
+      .skip(offset)
+      .limit(limit)
+      .toArray() as Promise<ReplayRecord[]>;
   }
 
   static async listByRoom(roomId: string): Promise<ReplayRecord[]> {
-    return db.any(
-      `SELECT r.*, u.username
-         FROM replays r
-         JOIN users u ON u.id = r.user_id
-        WHERE r.room_id = $1
-        ORDER BY r.final_score DESC`,
-      [roomId]
-    );
+    const db = getDb();
+    return db.collection('replays').aggregate([
+      { $match: { room_id: roomId } },
+      { $lookup: { from: 'users', localField: 'user_id', foreignField: 'id', as: 'user' } },
+      { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
+      { $addFields: { username: '$user.username' } },
+      { $sort: { final_score: -1 } },
+    ]).toArray() as Promise<ReplayRecord[]>;
   }
 
   static async getTopReplays(limit = 10): Promise<ReplayRecord[]> {
-    return db.any(
-      `SELECT r.*, u.username, u.avatar
-         FROM replays r
-         JOIN users u ON u.id = r.user_id
-        ORDER BY r.final_score DESC
-        LIMIT $1`,
-      [limit]
-    );
+    const db = getDb();
+    return db.collection('replays').aggregate([
+      { $lookup: { from: 'users', localField: 'user_id', foreignField: 'id', as: 'user' } },
+      { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
+      { $addFields: { username: '$user.username', avatar: '$user.avatar' } },
+      { $sort: { final_score: -1 } },
+      { $limit: limit },
+    ]).toArray() as Promise<ReplayRecord[]>;
   }
 
   static async deleteById(id: string, userId: string): Promise<boolean> {
-    const result = await db.result(
-      'DELETE FROM replays WHERE id = $1 AND user_id = $2',
-      [id, userId]
-    );
-    return result.rowCount > 0;
+    const db = getDb();
+    const res = await db.collection('replays').deleteOne({ id, user_id: userId });
+    return res.deletedCount !== undefined && res.deletedCount > 0;
   }
 }

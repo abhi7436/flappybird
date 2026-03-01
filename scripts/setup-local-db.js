@@ -1,95 +1,46 @@
 #!/usr/bin/env node
 /**
- * Sets up local PostgreSQL for development:
- *  - Creates the `postgres` role (if missing)
- *  - Creates the `flappybirds` database (if missing)
- *  - Runs the schema migration
+ * Sets up local MongoDB for development:
+ *  - Verifies MongoDB is reachable on localhost (or via MONGODB_URI)
+ *  - Runs the `scripts/init-mongo.js` to create indexes
  *
- * Connects as the current OS user (no password required on Homebrew installs).
+ * Usage: MONGODB_URI and MONGODB_DB_NAME should be set in environment or .env
  */
-const { Client } = require('pg');
-const fs = require('fs');
-const path = require('path');
+const { MongoClient } = require('mongodb');
+const { execFileSync } = require('child_process');
+require('dotenv').config();
 
-async function run() {
-  // ── Step 1: connect as OS user to the default 'postgres' db ─
-  const admin = new Client({ host: 'localhost', port: 5432, database: 'postgres' });
-  await admin.connect();
-  console.log('✔ Connected to local PostgreSQL as', admin.user ?? process.env.USER);
+const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017';
 
-  // Create `postgres` role if it doesn't exist
-  await admin.query(`
-    DO $$
-    BEGIN
-      IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'postgres') THEN
-        CREATE ROLE postgres WITH LOGIN SUPERUSER PASSWORD 'postgres';
-        RAISE NOTICE 'Created role: postgres';
-      END IF;
-    END
-    $$;
-  `);
-  console.log('✔ Role "postgres" exists.');
-
-  // Create `flappybirds` database if it doesn't exist
-  const { rows } = await admin.query(
-    "SELECT 1 FROM pg_database WHERE datname = 'flappybirds'"
-  );
-  if (rows.length === 0) {
-    await admin.query('CREATE DATABASE flappybirds OWNER postgres');
-    console.log('✔ Created database: flappybirds');
-  } else {
-    console.log('✔ Database "flappybirds" already exists.');
+async function checkMongo() {
+  const client = new MongoClient(uri, { serverSelectionTimeoutMS: 3000 });
+  try {
+    await client.connect();
+    await client.db().admin().ping();
+    console.log('✔ Connected to local MongoDB at', uri);
+  } finally {
+    await client.close();
   }
-  await admin.end();
-
-  // ── Step 2: connect as postgres to flappybirds and run schema ─
-  const app = new Client({
-    host:     'localhost',
-    port:     5432,
-    user:     'postgres',
-    password: 'postgres',
-    database: 'flappybirds',
-  });
-  await app.connect();
-
-  const schemaPath = path.join(__dirname, '..', 'src', 'server', 'database', 'schema.sql');
-  const migrationPath = path.join(__dirname, '..', 'src', 'server', 'database', 'migrations', '002_advanced_features.sql');
-
-  // Check if schema is already applied (users table exists)
-  const { rows: tables } = await app.query(
-    "SELECT 1 FROM information_schema.tables WHERE table_name = 'users' AND table_schema = 'public'"
-  );
-
-  if (tables.length === 0) {
-    if (fs.existsSync(schemaPath)) {
-      const sql = fs.readFileSync(schemaPath, 'utf8');
-      await app.query(sql);
-      console.log('✔ Schema applied:', schemaPath);
-    }
-  } else {
-    console.log('✔ Schema already applied, skipping.');
-  }
-
-  // Always try migration but ignore "already exists" errors
-  if (fs.existsSync(migrationPath)) {
-    try {
-      const sql = fs.readFileSync(migrationPath, 'utf8');
-      await app.query(sql);
-      console.log('✔ Migration applied:', migrationPath);
-    } catch (err) {
-      if (err.code === '42P07' || err.code === '42710' || err.code === '42701' || err.message.includes('already exists')) {
-        console.log('✔ Migration already applied, skipping.');
-      } else {
-        throw err;
-      }
-    }
-  }
-
-  await app.end();
-  console.log('\n✔ Local database ready. You can now run ./start.sh\n');
 }
 
-run().catch(err => {
-  console.error('✖ Setup failed:', err.message);
-  process.exit(1);
-});
+async function runInit() {
+  try {
+    console.log('✔ Running init script: scripts/init-mongo.js');
+    execFileSync(process.execPath, ['scripts/init-mongo.js'], { stdio: 'inherit' });
+  } catch (err) {
+    console.error('✖ Failed to run init-mongo.js', err);
+    process.exit(1);
+  }
+}
+
+(async () => {
+  try {
+    await checkMongo();
+    await runInit();
+    console.log('\n✔ Local MongoDB ready. You can now run ./start.sh');
+    process.exit(0);
+  } catch (err) {
+    console.error('✖ Setup failed:', err && (err.message || err));
+    process.exit(1);
+  }
+})();

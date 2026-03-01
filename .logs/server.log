@@ -1,0 +1,54 @@
+
+> flappy-birds-multiplayer@1.0.0 dev
+> ts-node-dev --respawn --transpile-only src/server/index.ts
+
+[INFO] 15:41:54 ts-node-dev ver. 2.0.0 (using ts-node ver. 10.9.2, typescript ver. 5.9.3)
+[Redis] Connected
+[DB] Connected to PostgreSQL
+[Server] Datastores connected
+[WS] Redis adapter attached
+[Server] Listening on http://localhost:3001
+[WS] Connected: pBExcbEiKuRmvnGAAAAB (spr1nt)
+[WS] Connected: 2bjJWizMySZr7-r2AAAD (user2)
+[DB] Connected to PostgreSQL
+[WS] Disconnected: pBExcbEiKuRmvnGAAAAB (spr1nt)
+[WS] Connected: yFRXx1WiYjHJMAXEAAAF (spr1nt)
+[WS] Disconnected: 2bjJWizMySZr7-r2AAAD (user2)
+[WS] Connected: 40iZHgl0NmW10VuFAAAH (user2)
+[WS] Disconnected: 40iZHgl0NmW10VuFAAAH (user2)
+[WS] Connected: CHkwE6eWdFST_natAAAJ (user2)
+[DB] Connected to PostgreSQL
+[RoomService] All players dead in dcEOH0-E4sU — closing in 30s
+[WS] Disconnected: yFRXx1WiYjHJMAXEAAAF (spr1nt)
+[WS] Disconnected: CHkwE6eWdFST_natAAAJ (user2)
+[RoomService] Room dcEOH0-E4sU closed — reason: all_dead
+[DB] Connected to PostgreSQL
+[DB] Connected to PostgreSQL
+[WS] Connected: sd7lwjpG4by6pzmoAAAL (spr1nt)
+[WS] Connected: Mx1RRtI9CjyllW8fAAAN (user2)
+[DB] Connected to PostgreSQL
+[RoomService] All players dead in 0teYNxl0bhc — closing in 30s
+[WS] Disconnected: sd7lwjpG4by6pzmoAAAL (spr1nt)
+[WS] Disconnected: Mx1RRtI9CjyllW8fAAAN (user2)
+[RoomService] Room 0teYNxl0bhc closed — reason: all_dead
+[DB] Connected to PostgreSQL
+[DB] Connected to PostgreSQL
+[WS] Connected: dMwSX2pvydYWThaiAAAP (spr1nt)
+[RoomService] Closing idle room -6eG0l7jFEk (idle 310s)
+[RoomService] Room -6eG0l7jFEk closed — reason: inactivity
+[INFO] 15:49:20 Restarting: /home/spr1nt/Documents/projects/flappybird/src/server/config/env.ts has been modified
+[Server] SIGTERM received — shutting down gracefully
+[RoomService] Closing idle room 6iFmGwkRIqw (idle 328s)
+[RoomService] Room 6iFmGwkRIqw closed — reason: inactivity
+[Server] SIGINT received — shutting down gracefully
+[WS] Disconnected: dMwSX2pvydYWThaiAAAP (spr1nt)
+Error: Called end on pool more than once
+    at BoundPool.end (/home/spr1nt/Documents/projects/flappybird/node_modules/pg-pool/index.js:461:19)
+    at /home/spr1nt/Documents/projects/flappybird/src/server/index.ts:126:18
+    at Server.close (node:net:2284:9)
+    at Object.onceWrapper (node:events:638:28)
+    at Server.emit (node:events:536:35)
+    at emitCloseNT (node:net:2344:8)
+    at processTicksAndRejections (node:internal/process/task_queues:81:21)
+[DB] Connected to PostgreSQL
+[Server] Closed

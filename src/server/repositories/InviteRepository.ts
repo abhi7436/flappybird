@@ -1,4 +1,4 @@
-import { pool } from '../database/connection';
+import { getDb } from '../database/connection';
 import { RoomInviteRecord } from '../types';
 
 export class InviteRepository {
@@ -7,28 +7,28 @@ export class InviteRepository {
     createdBy: string,
     inviteCode: string
   ): Promise<RoomInviteRecord> {
-    const { rows } = await pool.query<RoomInviteRecord>(
-      `INSERT INTO room_invites (room_id, created_by, invite_code)
-       VALUES ($1, $2, $3)
-       RETURNING *`,
-      [roomId, createdBy, inviteCode]
-    );
-    return rows[0];
+    const db = getDb();
+    const now = new Date();
+    const doc = {
+      room_id: roomId,
+      created_by: createdBy,
+      invite_code: inviteCode,
+      expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      created_at: now,
+    } as any;
+    const res = await db.collection('room_invites').insertOne(doc);
+    doc.id = res.insertedId.toHexString();
+    return doc as RoomInviteRecord;
   }
 
   static async findByCode(code: string): Promise<RoomInviteRecord | null> {
-    const { rows } = await pool.query<RoomInviteRecord>(
-      `SELECT * FROM room_invites
-        WHERE invite_code = $1
-          AND expires_at > NOW()`,
-      [code]
-    );
-    return rows[0] ?? null;
+    const db = getDb();
+    const doc = await db.collection('room_invites').findOne({ invite_code: code, expires_at: { $gt: new Date() } });
+    return (doc as unknown as RoomInviteRecord) ?? null;
   }
 
   static async deleteExpired(): Promise<void> {
-    await pool.query(
-      `DELETE FROM room_invites WHERE expires_at <= NOW()`
-    );
+    const db = getDb();
+    await db.collection('room_invites').deleteMany({ expires_at: { $lte: new Date() } });
   }
 }

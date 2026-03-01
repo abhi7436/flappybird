@@ -6,7 +6,7 @@
 
 import { TournamentRepository } from '../repositories/TournamentRepository';
 import { TournamentRecord, TournamentParticipant, TournamentMatch } from '../types';
-import { db } from '../database/connection';
+import { getDb } from '../database/connection';
 
 export class TournamentService {
   /**
@@ -26,14 +26,10 @@ export class TournamentService {
       (a, b) => b.elo_at_entry - a.elo_at_entry
     );
 
-    await db.tx(async (t) => {
-      for (let i = 0; i < sorted.length; i++) {
-        await t.none(
-          'UPDATE tournament_participants SET seed = $1 WHERE id = $2',
-          [i + 1, sorted[i].id]
-        );
-      }
-    });
+    const db = getDb();
+    for (let i = 0; i < sorted.length; i++) {
+      await db.collection('tournament_participants').updateOne({ id: sorted[i].id }, { $set: { seed: i + 1 } });
+    }
 
     if (detail.bracket_type === 'single_elimination') {
       await TournamentService.generateSEBracket(tournamentId, sorted);
@@ -93,10 +89,8 @@ export class TournamentService {
     p1Score: number,
     p2Score: number
   ): Promise<void> {
-    const match = await db.oneOrNone<TournamentMatch>(
-      'SELECT * FROM tournament_matches WHERE id = $1',
-      [matchId]
-    );
+    const db = getDb();
+    const match = await db.collection('tournament_matches').findOne({ id: matchId }) as TournamentMatch | null;
     if (!match) throw new Error('MATCH_NOT_FOUND');
 
     await TournamentRepository.saveMatchResult(matchId, winnerId, p1Score, p2Score);
@@ -104,25 +98,13 @@ export class TournamentService {
     // Mark loser as eliminated
     const loserId = match.player1_id === winnerId ? match.player2_id : match.player1_id;
     if (loserId) {
-      await db.none(
-        `UPDATE tournament_participants
-            SET eliminated_round = (
-              SELECT current_round FROM tournaments WHERE id = $1
-            )
-          WHERE tournament_id = $1 AND user_id = $2`,
-        [match.tournament_id, loserId]
-      );
+      const t = getDb();
+      const tournament = await t.collection('tournaments').findOne({ id: match.tournament_id });
+      await t.collection('tournament_participants').updateOne({ tournament_id: match.tournament_id, user_id: loserId }, { $set: { eliminated_round: tournament?.current_round ?? null } });
     }
 
     // Check if the round is complete
-    const { pending } = await db.one<{ pending: number }>(
-      `SELECT COUNT(*) AS pending
-         FROM tournament_matches
-        WHERE tournament_id = $1
-          AND round_number  = $2
-          AND status NOT IN ('completed', 'bye')`,
-      [match.tournament_id, match.round_number]
-    );
+    const pending = await getDb().collection('tournament_matches').countDocuments({ tournament_id: match.tournament_id, round_number: match.round_number, status: { $nin: ['completed', 'bye'] } });
 
     if (Number(pending) === 0) {
       await TournamentService.advanceBracket(match.tournament_id);
@@ -166,16 +148,9 @@ export class TournamentService {
   ): Promise<void> {
     await TournamentRepository.updateStatus(tournamentId, 'completed');
     if (!championId) return;
-    await db.none(
-      `UPDATE tournament_participants
-          SET final_placement = 1
-        WHERE tournament_id = $1 AND user_id = $2`,
-      [tournamentId, championId]
-    );
-    await db.none(
-      `UPDATE tournaments SET ended_at = NOW() WHERE id = $1`,
-      [tournamentId]
-    );
+    const db = getDb();
+    await db.collection('tournament_participants').updateOne({ tournament_id: tournamentId, user_id: championId }, { $set: { final_placement: 1 } });
+    await db.collection('tournaments').updateOne({ id: tournamentId }, { $set: { ended_at: new Date() } });
   }
 
   private static nextPowerOfTwo(n: number): number {

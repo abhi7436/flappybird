@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { requireAuth as authenticate } from '../middleware/authMiddleware';
 import { TournamentRepository } from '../repositories/TournamentRepository';
 import { TournamentService } from '../services/TournamentService';
-import { db } from '../database/connection';
+import { getDb } from '../database/connection';
 
 const router = Router();
 
@@ -56,10 +56,9 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
 /** POST /api/tournaments/:id/register */
 router.post('/:id/register', authenticate, async (req: Request, res: Response) => {
   try {
-    const { elo_rating } = await db.one<{ elo_rating: number }>(
-      'SELECT elo_rating FROM users WHERE id = $1',
-      [req.user!.userId]
-    );
+    const db = getDb();
+    const u = await db.collection('users').findOne({ id: req.user!.userId }, { projection: { elo_rating: 1 } });
+    const elo_rating = u?.elo_rating ?? 1000;
     await TournamentRepository.register(req.params.id, req.user!.userId, elo_rating);
     res.json({ success: true });
   } catch (err: any) {
