@@ -1,0 +1,26 @@
+# ── Git ───────────────────────────────────────────────────────
+.git
+.gitignore
+
+# ── Dev tooling ───────────────────────────────────────────────
+.vscode
+.idea
+
+# ── Dependencies (rebuilt inside container) ───────────────────
+node_modules
+
+# ── Build artefacts (rebuilt inside container) ────────────────
+dist
+build
+
+# ── Env files ─────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Docker files ──────────────────────────────────────────────
+Dockerfile*
+.dockerignore
+
+# ── Docs ──────────────────────────────────────────────────────
+*.md

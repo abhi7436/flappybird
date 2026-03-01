@@ -21,6 +21,8 @@ RUN addgroup --system --gid 1001 appgroup && \
     adduser  --system --uid 1001 --ingroup appgroup appuser
 
 ENV NODE_ENV=production
+# PORT default; Render (and any 12-factor host) overrides this at runtime
+ENV PORT=3001
 
 # Copy only built artifacts and production node_modules
 COPY --from=builder --chown=appuser:appgroup /app/node_modules ./node_modules
@@ -29,10 +31,11 @@ COPY --from=builder --chown=appuser:appgroup /app/package.json ./
 
 USER appuser
 
-EXPOSE 3001
+# Render overrides PORT via env var — EXPOSE is documentation only
+EXPOSE ${PORT}
 
-# Lightweight health check using the /health endpoint
-HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget -qO- http://localhost:3001/health || exit 1
+# Health check honours the runtime PORT env var
+HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \
+  CMD /bin/sh -c "wget -qO- http://localhost:${PORT}/health || exit 1"
 
 CMD ["node", "dist/server/index.js"]

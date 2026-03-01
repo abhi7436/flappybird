@@ -1,0 +1,117 @@
+# render.yaml — Render Blueprint (Infrastructure-as-Code)
+#
+# Deploys:
+#   • flappybird-api   — Node.js API + Socket.IO server  (root Dockerfile)
+#   • flappybird-web   — React/Vite SPA served by NGINX  (web/Dockerfile)
+#   • flappybird-redis — Managed Redis instance
+#   • flappybird-db    — Managed PostgreSQL 16 instance
+#
+# First-time setup:
+#   1. Push the repo to GitHub / GitLab.
+#   2. Go to https://dashboard.render.com → New → Blueprint.
+#   3. Point Render at this repo — it reads this file automatically.
+#   4. Review the generated services and confirm.
+#
+# After creation, update these two env vars in the Render dashboard
+# (or sync them with the actual service URLs Render assigns):
+#   • CORS_ORIGIN / FRONTEND_URL  on flappybird-api
+#   • VITE_API_URL                on flappybird-web  (build-time arg)
+
+# ── Services ──────────────────────────────────────────────────
+services:
+
+  # ── Backend API + WebSocket server ────────────────────────
+  - type: web
+    name: flappybird-api
+    env: docker
+    # Build from the root Dockerfile
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    region: oregon
+    plan: free
+    healthCheckPath: /health
+    # Render injects PORT automatically; the server reads it via env.ts
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      # Render populates these from the managed services below
+      - key: DATABASE_URL
+        fromDatabase:
+          name: flappybird-db
+          property: connectionString
+
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: flappybird-redis
+          property: connectionString
+
+      # Auto-generated 64-char secret on first deploy
+      - key: JWT_SECRET
+        generateValue: true
+
+      - key: JWT_EXPIRES_IN
+        value: "7d"
+
+      # ⚠️  After first deploy, replace with the actual Render URL of
+      #     flappybird-web (e.g. https://flappybird-web.onrender.com)
+      - key: CORS_ORIGIN
+        value: https://flappybird-web.onrender.com
+
+      - key: FRONTEND_URL
+        value: https://flappybird-web.onrender.com
+
+      - key: RATE_LIMIT_WINDOW_MS
+        value: "900000"   # 15 min
+
+      - key: RATE_LIMIT_MAX
+        value: "100"
+
+      - key: AUTH_RATE_LIMIT_MAX
+        value: "10"
+
+      - key: MAX_PLAYERS_PER_ROOM
+        value: "50"
+
+      - key: BCRYPT_ROUNDS
+        value: "12"
+
+  # ── Frontend SPA ───────────────────────────────────────────
+  - type: web
+    name: flappybird-web
+    env: docker
+    dockerfilePath: ./web/Dockerfile
+    dockerContext: ./web
+    region: oregon
+    plan: free
+    healthCheckPath: /
+    envVars:
+      # Render passes all env vars as Docker build-args too, so
+      # VITE_API_URL is available to Vite at build time via the ARG
+      # declared in web/Dockerfile.
+      # ⚠️  After first deploy replace with the actual API service URL.
+      - key: VITE_API_URL
+        value: https://flappybird-api.onrender.com
+
+      # Runtime PORT is set automatically by Render; nginx reads it
+      # via the nginx-spa.conf.template envsubst step in the Dockerfile.
+
+  # ── Managed Redis ─────────────────────────────────────────
+  - type: redis
+    name: flappybird-redis
+    region: oregon
+    plan: free
+    maxmemoryPolicy: noeviction
+    ipAllowList: []   # private — only accessible within Render network
+
+# ── Managed PostgreSQL ────────────────────────────────────────
+databases:
+  - name: flappybird-db
+    databaseName: flappybirds
+    user: flappybird
+    region: oregon
+    plan: free
+    # Schema is applied by running the migration after first deploy:
+    #   render run --service flappybird-api -- \
+    #     psql $DATABASE_URL -f src/server/database/schema.sql

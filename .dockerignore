@@ -1,0 +1,40 @@
+# ── Git ───────────────────────────────────────────────────────
+.git
+.gitignore
+.gitattributes
+
+# ── Dev tooling & CI ──────────────────────────────────────────
+.github
+.vscode
+.idea
+
+# ── Dependencies (rebuilt inside container) ───────────────────
+node_modules
+
+# ── Build artefacts (rebuilt inside container) ────────────────
+dist
+build
+
+# ── Test artefacts ────────────────────────────────────────────
+coverage
+*.test.ts
+jest.config.ts
+
+# ── Env files (secrets must never enter the image) ────────────
+.env
+.env.*
+!.env.example
+
+# ── Docker / Compose files (not needed inside the container) ──
+docker-compose*.yml
+Dockerfile*
+.dockerignore
+
+# ── Frontend sources (backend image only needs src/server) ────
+web
+mobile
+nginx
+scripts
+
+# ── Docs ──────────────────────────────────────────────────────
+*.md
