@@ -48,6 +48,24 @@ interface Particle {
   size: number;
 }
 
+interface SweatDrop {
+  /** Position relative to bird centre (world-space, no rotation) */
+  x: number;
+  y: number;
+  vy: number;       // falls downward each tick
+  life: number;
+  maxLife: number;
+  size: number;
+}
+
+interface FireParticle {
+  x: number;  y: number;       // offset from bird centre (world-space)
+  vx: number; vy: number;
+  life: number; maxLife: number;
+  size: number;
+  hue: number;              // 0–45: red → orange → yellow
+}
+
 export interface BirdAnimState {
   // Wing sine wave
   wingPhase:   number;        // radians, 0–2π
@@ -73,6 +91,25 @@ export interface BirdAnimState {
   // Particles
   particles: Particle[];
 
+  // Death burst (one-shot explosion on first dead frame)
+  wasAlive: boolean;
+
+  // ── Phase 3 personality ───────────────────────────────────────
+  /** Flying sweat drops when near a pipe */
+  sweatDrops:  SweatDrop[];
+  /** 0–1 blush intensity (rosy cheeks on coin streak), fades out */
+  blushLevel:  number;
+  /** ms of dizzy-star orbit remaining after a near-miss */
+  dizzyTimer:  number;
+  /** Angular position [0–2π] of the orbiting dizzy stars */
+  dizzyPhase:  number;
+  /** Whether the bird was near-collision last frame (for transition detection) */
+  wasNearCol:  boolean;
+
+  // ── Phase 4: Fire trail ───────────────────────────────────────────
+  /** Ember particles trailing the tail on score streak (score ≥ 8) */
+  fireParticles: FireParticle[];
+
   // Frame timing
   lastTs: number;
 }
@@ -97,6 +134,13 @@ export const BirdRenderer = {
       lastScore:       0,
       scorePulse:      0,
       particles:       [],
+      wasAlive:        true,
+      sweatDrops:      [],
+      blushLevel:      0,
+      dizzyTimer:      0,
+      dizzyPhase:      0,
+      wasNearCol:      false,
+      fireParticles:   [],
       lastTs:          0,
     };
   },
@@ -109,6 +153,7 @@ export const BirdRenderer = {
     score:         number,
     nearCollision: boolean,
     isDead:        boolean,
+    blushLevel     = 0,         // 0–1 from caller (coin streak)
   ): void {
     const dt = s.lastTs ? Math.min(ts - s.lastTs, 50) : 16.67;
     s.lastTs = ts;
@@ -169,17 +214,100 @@ export const BirdRenderer = {
       s.expression = 'neutral';
     }
 
+    // ── Death burst — one-shot omnidirectional feather explosion ──
+    if (isDead && s.wasAlive) {
+      s.wasAlive = false;
+      for (let i = 0; i < 34; i++) {
+        const angle = (i / 34) * Math.PI * 2 + (Math.random() - 0.5) * 0.45;
+        const spd   = 0.055 + Math.random() * 0.22;
+        s.particles.push({
+          x:       (Math.random() - 0.5) * 12,
+          y:       (Math.random() - 0.5) * 8,
+          vx:      Math.cos(angle) * spd,
+          vy:      Math.sin(angle) * spd - 0.055,
+          life:    650 + Math.random() * 700,
+          maxLife: 1350,
+          size:    2.0 + Math.random() * 5.0,
+        });
+      }
+    }
+
     // Score glow pulse
     if (score !== s.lastScore) { s.scorePulse = 1.0; s.lastScore = score; }
     s.scorePulse = Math.max(0, s.scorePulse - dt * 0.0030);
 
-    // Tick particles
+    // ── Phase 3 personality updates ──────────────────────────────────
+
+    // Blush — lerp toward caller-supplied level, then slowly fade
+    s.blushLevel = lerp(s.blushLevel, blushLevel, Math.min(1, dt * 0.008));
+    if (blushLevel === 0) s.blushLevel = Math.max(0, s.blushLevel - dt * 0.0012);
+
+    // Sweat drops — spawn on transition into near-collision
+    if (!isDead && nearCollision && !s.wasNearCol) {
+      for (let i = 0; i < 3; i++) {
+        s.sweatDrops.push({
+          x:       16 + (Math.random() - 0.5) * 10,  // near head (right side)
+          y:       -18 + (Math.random() - 0.5) * 6,
+          vy:      0.040 + Math.random() * 0.022,
+          life:    420 + Math.random() * 220,
+          maxLife: 640,
+          size:    2.5 + Math.random() * 1.8,
+        });
+      }
+    }
+
+    // Near-miss detection: was near, now safe, still alive → dizzy
+    if (!isDead && s.wasNearCol && !nearCollision) {
+      s.dizzyTimer = 1_400;
+    }
+    s.wasNearCol = nearCollision;
+
+    // Dizzy stars spin
+    if (s.dizzyTimer > 0) {
+      s.dizzyTimer  = Math.max(0, s.dizzyTimer  - dt);
+      s.dizzyPhase  = (s.dizzyPhase + dt * 0.0046) % (Math.PI * 2);
+    }
+
+    // Tick sweat drops
+    s.sweatDrops = s.sweatDrops.filter(d => d.life > 0);
+    for (const d of s.sweatDrops) {
+      d.life -= dt;
+      d.y    += d.vy * dt;
+    }
+
+    // Tick feather particles
     s.particles = s.particles.filter(p => p.life > 0);
     for (const p of s.particles) {
       p.life -= dt;
       p.x    += p.vx * dt;
       p.y    += p.vy * dt;
       p.vy   += 0.00013 * dt; // gentle gravity
+    }
+
+    // ── Phase 4: Fire trail (score streak) ──────────────────────────
+    if (!isDead && score >= 8) {
+      const intensity = Math.min(1, (score - 8) / 28); // ramps 8 → 36
+      const slots     = 1 + Math.floor(intensity * 2);
+      for (let i = 0; i < slots; i++) {
+        if (Math.random() < 0.55 + intensity * 0.35) {
+          s.fireParticles.push({
+            x:       -14 + (Math.random() - 0.5) * 10, // tail (left of centre)
+            y:       (Math.random() - 0.5) * 14,
+            vx:      -(0.028 + Math.random() * 0.052), // drifts left
+            vy:      (Math.random() - 0.5) * 0.030,
+            life:    260 + Math.random() * 300,
+            maxLife: 560,
+            size:    1.8 + Math.random() * 2.6 + intensity * 1.8,
+            hue:     Math.random() * 45,               // red–orange–yellow
+          });
+        }
+      }
+    }
+    s.fireParticles = s.fireParticles.filter(f => f.life > 0);
+    for (const f of s.fireParticles) {
+      f.life -= dt;
+      f.x    += f.vx * dt;
+      f.y    += f.vy * dt;
     }
   },
 
@@ -203,6 +331,29 @@ export const BirdRenderer = {
     ctx.ellipse(cx, cy + r * 1.66, r * 1.05, r * 0.21, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
+
+    // ── Sweat drops (world-space, fall straight down) ────
+    for (const d of s.sweatDrops) {
+      const alpha = (d.life / d.maxLife) * 0.82;
+      const wx = cx + d.x;
+      const wy = cy + d.y;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      // Teardrop shape: ellipse tilted slightly
+      ctx.fillStyle = '#a0d8ef';
+      ctx.strokeStyle = '#5ba3c9';
+      ctx.lineWidth = 0.7;
+      ctx.beginPath();
+      ctx.ellipse(wx, wy, d.size * 0.52, d.size, Math.PI * 0.1, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      // Shine
+      ctx.fillStyle = 'rgba(255,255,255,0.55)';
+      ctx.beginPath();
+      ctx.ellipse(wx - d.size * 0.12, wy - d.size * 0.32, d.size * 0.18, d.size * 0.24, -0.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
 
     // ── Gold score-glow pulse ─────────────────────────
     if (s.scorePulse > 0) {
@@ -228,6 +379,24 @@ export const BirdRenderer = {
       const angle = Math.atan2(p.vy, p.vx);
       ctx.beginPath();
       ctx.ellipse(cx + p.x, cy + p.y, p.size, p.size * 0.36, angle, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // ── Fire trail particles (world-space, drawn behind bird) ────────
+    for (const f of s.fireParticles) {
+      const t  = f.life / f.maxLife;
+      const wx = cx + f.x;
+      const wy = cy + f.y;
+      ctx.save();
+      ctx.globalAlpha = t * 0.88;
+      const fg = ctx.createRadialGradient(wx, wy, 0, wx, wy, f.size * 1.1);
+      fg.addColorStop(0,   `hsl(${f.hue + 22}, 100%, 92%)`);
+      fg.addColorStop(0.5, `hsl(${f.hue},      100%, 58%)`);
+      fg.addColorStop(1,   `hsla(${f.hue - 8}, 100%, 40%, 0)`);
+      ctx.fillStyle = fg;
+      ctx.beginPath();
+      ctx.arc(wx, wy, f.size * 1.1, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     }
@@ -364,6 +533,38 @@ export const BirdRenderer = {
     // ── EYE + EXPRESSION ───────────────────────────────
     _drawEye(ctx, r, hx, hy, skin, s);
 
+    // ── BLUSH (rosy cheeks on coin streak) ───────────
+    if (s.blushLevel > 0.02) {
+      ctx.save();
+      ctx.globalAlpha = s.blushLevel * 0.42;
+      ctx.fillStyle   = '#ff6b8a';
+      // Left cheek (toward tail)
+      ctx.beginPath();
+      ctx.ellipse(hx - r * 0.26, hy + r * 0.22, r * 0.23, r * 0.14, -0.1, 0, Math.PI * 2);
+      ctx.fill();
+      // Right cheek (toward beak)
+      ctx.beginPath();
+      ctx.ellipse(hx + r * 0.22, hy + r * 0.22, r * 0.23, r * 0.14, 0.1, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // ── DIZZY STARS (near-miss aftermath) ─────────────
+    if (s.dizzyTimer > 0) {
+      const fadeAlpha = Math.min(1, s.dizzyTimer / 300);
+      const orbitR    = r * 1.22;
+      ctx.save();
+      ctx.globalAlpha = fadeAlpha * 0.88;
+      for (let i = 0; i < 3; i++) {
+        const angle = s.dizzyPhase + (i / 3) * Math.PI * 2;
+        const sx    = hx + Math.cos(angle) * orbitR;
+        const sy    = hy + Math.sin(angle) * orbitR;
+        _drawStar(ctx, sx, sy, r * 0.18, r * 0.08, 4,
+          i === 0 ? '#ffe066' : i === 1 ? '#ff99cc' : '#99eeff');
+      }
+      ctx.restore();
+    }
+
     // ── BEAK ──────────────────────────────────────────
     _drawBeak(ctx, r, hx, hy, hr, skin, wingAngle, s);
 
@@ -381,8 +582,102 @@ export const BirdRenderer = {
 };
 
 // ─────────────────────────────────────────────────────────────
+// Crown — drawn above the bird for the current room leader
+// Call from outside the rotated ctx.save() block (world-space)
+// ─────────────────────────────────────────────────────────────
+
+export function drawCrownAboveBird(
+  ctx:  CanvasRenderingContext2D,
+  cx:   number,
+  cy:   number,
+  size = 34,
+): void {
+  const r   = size / 2;
+  const top = cy - r * 1.28;   // just above bird top
+  const cw  = r * 1.10;        // crown half-width
+  const ch  = r * 0.64;        // crown height
+
+  ctx.save();
+
+  // Outer glow
+  ctx.shadowColor = 'rgba(255, 215, 0, 0.7)';
+  ctx.shadowBlur  = 8;
+
+  // Crown body — 5-point flat crown shape
+  ctx.fillStyle   = '#f5c518';
+  ctx.strokeStyle = '#b8860b';
+  ctx.lineWidth   = 1.4;
+  ctx.beginPath();
+  // Bottom edge
+  ctx.moveTo(cx - cw, top + ch);
+  ctx.lineTo(cx + cw, top + ch);
+  // Right side zigzag up
+  ctx.lineTo(cx + cw, top + ch * 0.44);
+  ctx.lineTo(cx + cw * 0.58, top + ch * 0.82);
+  ctx.lineTo(cx + cw * 0.28, top);
+  // Center peak
+  ctx.lineTo(cx, top + ch * 0.62);
+  ctx.lineTo(cx - cw * 0.28, top);
+  // Left side zigzag down
+  ctx.lineTo(cx - cw * 0.58, top + ch * 0.82);
+  ctx.lineTo(cx - cw, top + ch * 0.44);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.shadowBlur = 0;
+
+  // Three jewel dots
+  const jewels: Array<[number, number]> = [
+    [cx - cw * 0.46, top + ch * 0.62],
+    [cx,             top + ch * 0.54],
+    [cx + cw * 0.46, top + ch * 0.62],
+  ];
+  const jewelColors = ['#ff4466', '#ffffff', '#44aaff'];
+  jewels.forEach(([jx, jy], i) => {
+    ctx.beginPath();
+    ctx.arc(jx, jy, r * 0.090, 0, Math.PI * 2);
+    ctx.fillStyle = jewelColors[i];
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+    ctx.lineWidth   = 0.7;
+    ctx.stroke();
+    // shine
+    ctx.beginPath();
+    ctx.arc(jx - r * 0.032, jy - r * 0.028, r * 0.035, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.fill();
+  });
+
+  ctx.restore();
+}
+
+// ─────────────────────────────────────────────────────────────
 // Private sub-renderers (module-level, no object allocation)
 // ─────────────────────────────────────────────────────────────
+
+/** 4-point or N-point star shape */
+function _drawStar(
+  ctx:    CanvasRenderingContext2D,
+  cx:     number,
+  cy:     number,
+  outerR: number,
+  innerR: number,
+  points: number,
+  color:  string,
+): void {
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  for (let i = 0; i < points * 2; i++) {
+    const angle = (i / (points * 2)) * Math.PI * 2 - Math.PI / 2;
+    const dist  = i % 2 === 0 ? outerR : innerR;
+    const x     = cx + Math.cos(angle) * dist;
+    const y     = cy + Math.sin(angle) * dist;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fill();
+}
 
 function _drawEye(
   ctx:  CanvasRenderingContext2D,

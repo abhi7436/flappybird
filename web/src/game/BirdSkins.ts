@@ -1,63 +1,126 @@
 import { BirdSkin, BirdSkinId } from '../types';
-import { BirdRenderer, BirdAnimState } from './BirdRenderer';
+import { BirdRenderer, BirdAnimState, drawCrownAboveBird } from './BirdRenderer';
 
 // Re-export so canvas files can import from one place
 export type { BirdAnimState } from './BirdRenderer';
-export { BirdRenderer } from './BirdRenderer';
+export { BirdRenderer, drawCrownAboveBird } from './BirdRenderer';
 
 export const BIRD_SKINS: Record<BirdSkinId, BirdSkin> = {
   classic: {
-    id: 'classic', name: 'Classic',
-    bodyColor:  '#FFD700',
-    wingColor:  '#FFA500',
-    eyeColor:   '#111',
-    beakColor:  '#FF6B00',
+    id: 'classic', name: 'Classic', emoji: '🐦',
+    rarity: 'common',
+    bodyColor:   '#FFD700',
+    wingColor:   '#FFA500',
+    eyeColor:    '#111',
+    beakColor:   '#FF6B00',
     unlockScore: 0,
   },
   blue: {
-    id: 'blue', name: 'Bluebird',
-    bodyColor:  '#4FC3F7',
-    wingColor:  '#0288D1',
-    eyeColor:   '#111',
-    beakColor:  '#FF8F00',
+    id: 'blue', name: 'Bluebird', emoji: '🐦‍❄️',
+    rarity: 'common',
+    bodyColor:   '#4FC3F7',
+    wingColor:   '#0288D1',
+    eyeColor:    '#111',
+    beakColor:   '#FF8F00',
     unlockScore: 10,
   },
   red: {
-    id: 'red', name: 'Cardinal',
-    bodyColor:  '#EF5350',
-    wingColor:  '#B71C1C',
-    eyeColor:   '#111',
-    beakColor:  '#FFA000',
+    id: 'red', name: 'Cardinal', emoji: '🐓',
+    rarity: 'common',
+    bodyColor:   '#EF5350',
+    wingColor:   '#B71C1C',
+    eyeColor:    '#111',
+    beakColor:   '#FFA000',
     unlockScore: 20,
   },
   gold: {
-    id: 'gold', name: 'Golden',
-    bodyColor:  '#FFD700',
-    wingColor:  '#F9A825',
-    eyeColor:   '#000',
-    beakColor:  '#E65100',
-    glowColor:  'rgba(255, 215, 0, 0.6)',
+    id: 'gold', name: 'Golden', emoji: '✨',
+    rarity: 'rare',
+    bodyColor:   '#FFD700',
+    wingColor:   '#F9A825',
+    eyeColor:    '#000',
+    beakColor:   '#E65100',
+    glowColor:   'rgba(255, 215, 0, 0.7)',
     unlockScore: 35,
   },
   neon: {
-    id: 'neon', name: 'Neon',
-    bodyColor:  '#39FF14',
-    wingColor:  '#00E676',
-    eyeColor:   '#fff',
-    beakColor:  '#FF1744',
-    glowColor:  'rgba(57, 255, 20, 0.7)',
+    id: 'neon', name: 'Neon', emoji: '⚡',
+    rarity: 'rare',
+    bodyColor:   '#39FF14',
+    wingColor:   '#00E676',
+    eyeColor:    '#fff',
+    beakColor:   '#FF1744',
+    glowColor:   'rgba(57, 255, 20, 0.8)',
     unlockScore: 50,
   },
   galaxy: {
-    id: 'galaxy', name: 'Galaxy',
-    bodyColor:  '#7B1FA2',
-    wingColor:  '#4A148C',
-    eyeColor:   '#E1F5FE',
-    beakColor:  '#CE93D8',
-    glowColor:  'rgba(123, 31, 162, 0.8)',
+    id: 'galaxy', name: 'Galaxy', emoji: '🌌',
+    rarity: 'epic',
+    bodyColor:   '#7B1FA2',
+    wingColor:   '#4A148C',
+    eyeColor:    '#E1F5FE',
+    beakColor:   '#CE93D8',
+    glowColor:   'rgba(123, 31, 162, 0.9)',
     unlockScore: 75,
   },
+  inferno: {
+    id: 'inferno', name: 'Inferno', emoji: '🔥',
+    rarity: 'epic',
+    bodyColor:   '#FF3D00',
+    wingColor:   '#FF6D00',
+    eyeColor:    '#FFF176',
+    beakColor:   '#FFFF00',
+    glowColor:   'rgba(255, 61, 0, 0.9)',
+    unlockScore: 100,
+  },
+  aqua: {
+    id: 'aqua', name: 'Aqua', emoji: '🌊',
+    rarity: 'epic',
+    bodyColor:   '#00BCD4',
+    wingColor:   '#006064',
+    eyeColor:    '#fff',
+    beakColor:   '#00E5FF',
+    glowColor:   'rgba(0, 229, 255, 0.8)',
+    unlockScore: 125,
+  },
+  thunder: {
+    id: 'thunder', name: 'Thunder', emoji: '🌩️',
+    rarity: 'epic',
+    bodyColor:   '#FDD835',
+    wingColor:   '#F57F17',
+    eyeColor:    '#212121',
+    beakColor:   '#FFFFFF',
+    glowColor:   'rgba(253, 216, 53, 0.9)',
+    unlockScore: 150,
+  },
+  shadow: {
+    id: 'shadow', name: 'Shadow', emoji: '👤',
+    rarity: 'legendary',
+    bodyColor:   '#1A1A2E',
+    wingColor:   '#16213E',
+    eyeColor:    '#E040FB',
+    beakColor:   '#9C27B0',
+    glowColor:   'rgba(156, 39, 176, 0.9)',
+    unlockScore: 200,
+  },
+  rainbow: {
+    id: 'rainbow', name: 'Rainbow', emoji: '🌈',
+    rarity: 'legendary',
+    bodyColor:   '#FF6B9D',
+    wingColor:   '#A855F7',
+    eyeColor:    '#fff',
+    beakColor:   '#FBBF24',
+    glowColor:   'rgba(168, 85, 247, 0.9)',
+    unlockScore: 300,
+  },
 };
+
+export const RARITY_CONFIG = {
+  common:    { label: 'Common',    color: '#94a3b8', glow: '' },
+  rare:      { label: 'Rare',      color: '#60a5fa', glow: '0 0 8px rgba(96,165,250,0.6)' },
+  epic:      { label: 'Epic',      color: '#c084fc', glow: '0 0 8px rgba(192,132,252,0.7)' },
+  legendary: { label: 'Legendary', color: '#fbbf24', glow: '0 0 12px rgba(251,191,36,0.8)' },
+} as const;
 
 /**
  * Render the bird. animState comes from BirdRenderer.createState() stored
@@ -71,9 +134,11 @@ export function drawBird(
   rotation:  number,
   skin:      BirdSkin,
   animState: BirdAnimState,
-  size = 34,
+  size       = 34,
+  blushLevel = 0,
 ): void {
   BirdRenderer.draw(ctx, cx, cy, rotation, skin, animState, size);
+  void blushLevel; // blushLevel is now stored on animState via update(); kept in signature for clarity
 }
 
 /**

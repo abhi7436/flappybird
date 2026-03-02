@@ -26,6 +26,9 @@ interface GameStore {
   setRoomPlayers: (p: RoomPlayer[]) => void;
   addRoomPlayer: (p: RoomPlayer) => void;
   removeRoomPlayer: (userId: string) => void;
+  /** Server-driven countdown value (3→2→1→0→null). Non-null = countdown in progress. */
+  countdown: number | null;
+  setCountdown: (n: number | null) => void;
 
   // ── Game state ────────────────────────────────
   score: number;
@@ -66,7 +69,10 @@ interface GameStore {
   /** True while the initial /auth/me call is in flight */
   isRestoring: boolean;
   setIsRestoring: (v: boolean) => void;
-
+  // ── Live power-up tracking (per-player badge in leaderboard) ───────
+  playerPowerUps: Record<string, { type: string; activatedAt: number }>;
+  setPlayerPowerUp: (userId: string, type: string) => void;
+  clearPlayerPowerUp: (userId: string) => void;
   // ── WebSocket / connection errors ────────────────────────
   /** Non-null when the WS layer has a displayable error for the lobby/game */
   wsError: string | null;
@@ -92,6 +98,8 @@ export const useGameStore = create<GameStore>((set) => ({
   setRoom: (room) => set({ room }),
   roomPlayers: [],
   setRoomPlayers: (roomPlayers) => set({ roomPlayers }),
+  countdown: null,
+  setCountdown: (countdown) => set({ countdown }),
   addRoomPlayer: (p) =>
     set((s) => ({ roomPlayers: [...s.roomPlayers.filter((x) => x.userId !== p.userId), p] })),
   removeRoomPlayer: (userId) =>
@@ -136,13 +144,27 @@ export const useGameStore = create<GameStore>((set) => ({
   wsError: null,
   setWsError: (wsError) => set({ wsError }),
 
+  playerPowerUps: {},
+  setPlayerPowerUp: (userId, type) =>
+    set((s) => ({
+      playerPowerUps: { ...s.playerPowerUps, [userId]: { type, activatedAt: Date.now() } },
+    })),
+  clearPlayerPowerUp: (userId) =>
+    set((s) => {
+      const next = { ...s.playerPowerUps };
+      delete next[userId];
+      return { playerPowerUps: next };
+    }),
+
   resetGameState: () => set({
-    score:        0,
-    isAlive:      true,
-    finalScore:   0,
-    leaderboard:  [],
-    finalRanking: null,
-    room:         null,
-    roomPlayers:  [],
+    score:          0,
+    isAlive:        true,
+    finalScore:     0,
+    leaderboard:    [],
+    finalRanking:   null,
+    room:           null,
+    roomPlayers:    [],
+    countdown:      null,
+    playerPowerUps: {},
   }),
 }));

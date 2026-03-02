@@ -2,7 +2,14 @@
 // PowerUp entity — pure physics, no rendering concern
 // ============================================================
 
-export type PowerUpType = 'shield' | 'slow_pipes' | 'double_score';
+export type PowerUpType =
+  | 'shield'
+  | 'slow_pipes'
+  | 'double_score'
+  | 'slow_motion'
+  | 'magnet'
+  | 'golden_coin'
+  | 'turbo_jump';
 
 export interface PowerUpConfig {
   x: number;
@@ -28,6 +35,10 @@ export const POWERUP_DURATIONS: Record<PowerUpType, number> = {
   shield:       0,      // instant — blocks one collision
   slow_pipes:   6_000,  // 6 seconds
   double_score: 10_000, // 10 seconds
+  slow_motion:  2_000,  // 2 seconds — severe slowdown (25% pipe speed)
+  magnet:       5_000,  // 5 seconds — attracts coins
+  golden_coin:  5_000,  // 5 seconds — 3× score multiplier (via Bug collect)
+  turbo_jump:   2_000,  // 2 seconds — stronger jump (via Bug collect)
 };
 
 export class PowerUp {

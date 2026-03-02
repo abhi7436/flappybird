@@ -20,13 +20,15 @@ const ConnectingScreen: React.FC = () => (
                flex flex-col items-center gap-5"
   >
     <div className="relative w-16 h-16">
-      <div className="absolute inset-0 rounded-full border-4 border-white/10" />
-      <div className="absolute inset-0 rounded-full border-4 border-sky-400
-                      border-t-transparent animate-spin" />
+      <div className="absolute inset-0 rounded-full border-4 border-white/8" />
+      <div
+        className="absolute inset-0 rounded-full border-4 border-t-transparent animate-spin"
+        style={{ borderColor: '#FFD700', borderTopColor: 'transparent' }}
+      />
     </div>
     <div className="text-center">
-      <p className="text-white font-semibold">Connecting to room</p>
-      <p className="text-white/40 text-sm mt-1">Establishing secure session…</p>
+      <p className="text-white font-bold">Connecting to room</p>
+      <p className="text-white/35 text-sm mt-1">Establishing secure session…</p>
     </div>
   </motion.div>
 );
@@ -54,27 +56,55 @@ const ErrorScreen: React.FC<{ message: string; onBack: () => void }> = ({
 );
 
 // ── Countdown overlay ─────────────────────────────────────────
-const CountdownOverlay: React.FC<{ n: number }> = ({ n }) => (
-  <motion.div
-    key={n}
-    initial={{ scale: 2.5, opacity: 0 }}
-    animate={{ scale: 1, opacity: 1 }}
-    exit={{ scale: 0.4, opacity: 0 }}
-    transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-    className="absolute inset-0 flex items-center justify-center
-               bg-black/60 backdrop-blur-sm rounded-3xl z-10 pointer-events-none"
-  >
-    <span className="text-white font-black text-8xl drop-shadow-[0_0_32px_rgba(255,215,0,0.8)]">
-      {n === 0 ? '🐦' : n}
-    </span>
-  </motion.div>
-);
+const COUNTDOWN_COLORS: Record<number, string> = {
+  3: '#60a5fa', // blue
+  2: '#fbbf24', // amber
+  1: '#f87171', // red
+  0: '#4ade80', // green for GO
+};
+
+const CountdownOverlay: React.FC<{ n: number }> = ({ n }) => {
+  const isGo    = n === 0;
+  const color   = COUNTDOWN_COLORS[n] ?? '#ffffff';
+  const content = isGo ? 'GO! 🐦' : n.toString();
+  return (
+    <motion.div
+      key={n}
+      initial={{ scale: 2.8, opacity: 0 }}
+      animate={{ scale: 1,   opacity: 1 }}
+      exit={{    scale: 0.3, opacity: 0 }}
+      transition={{ type: 'spring', stiffness: 280, damping: 18 }}
+      className="absolute inset-0 flex items-center justify-center
+                 bg-black/65 backdrop-blur-sm rounded-3xl z-10 pointer-events-none"
+    >
+      <div className="flex flex-col items-center gap-3">
+        <motion.span
+          className="font-black"
+          style={{
+            fontSize: isGo ? '3.5rem' : '6rem',
+            lineHeight: 1,
+            color,
+            textShadow: `0 0 30px ${color}, 0 0 60px ${color}50`,
+          }}
+        >
+          {content}
+        </motion.span>
+        {!isGo && (
+          <span className="text-white/50 text-sm font-semibold tracking-widest uppercase">
+            Get ready!
+          </span>
+        )}
+      </div>
+    </motion.div>
+  );
+};
 
 // ── Main Lobby ────────────────────────────────────────────────
 export const Lobby: React.FC<Props> = ({ socket }) => {
   const {
     room,
     roomPlayers,
+    countdown,
     user,
     setScreen,
     pendingJoinRoomId,
@@ -84,6 +114,7 @@ export const Lobby: React.FC<Props> = ({ socket }) => {
   } = useGameStore((s) => ({
     room:                 s.room,
     roomPlayers:          s.roomPlayers,
+    countdown:            s.countdown,
     user:                 s.user,
     setScreen:            s.setScreen,
     pendingJoinRoomId:    s.pendingJoinRoomId,
@@ -93,9 +124,13 @@ export const Lobby: React.FC<Props> = ({ socket }) => {
   }));
 
   const { play } = useSound();
-  const [countdown, setCountdown]       = useState<number | null>(null);
   const [connectError, setConnectError] = useState<string | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Play countdown sounds driven by server countdown value ──
+  useEffect(() => {
+    if (countdown !== null && countdown > 0) play('countdown');
+  }, [countdown, play]);
 
   // ── Clear wsError from the store when the Lobby unmounts ────────────
   useEffect(() => () => { setWsError(null); }, [setWsError]);
@@ -128,24 +163,11 @@ export const Lobby: React.FC<Props> = ({ socket }) => {
     setScreen('menu');
   };
 
-  // ── Countdown → start_game ─────────────────────────────────
+  // ── Start: emit to server — server runs the 3-2-1 countdown for all players ─
   const handleStart = () => {
-    if (!room) return;
+    if (!room || isCounting) return;
     play('menuClick');
-
-    let n = 3;
-    setCountdown(n);
-    const iv = setInterval(() => {
-      n--;
-      if (n < 0) {
-        clearInterval(iv);
-        setCountdown(null);
-        socket?.emit('start_game', { roomId: room.id });
-      } else {
-        setCountdown(n);
-        if (n > 0) play('countdown');
-      }
-    }, 1000);
+    socket?.emit('start_game', { roomId: room.id });
   };
 
   // ── Derived ────────────────────────────────────────────────
@@ -207,17 +229,18 @@ export const Lobby: React.FC<Props> = ({ socket }) => {
 
           {isHost ? (
             <motion.button
+              whileHover={canStart && !isCounting ? { scale: 1.02 } : {}}
               whileTap={canStart && !isCounting ? { scale: 0.96 } : {}}
               onClick={handleStart}
               disabled={isCounting}
               title={!canStart ? 'Need at least 2 players to start' : undefined}
               className={[
-                'flex-1 py-3 rounded-2xl font-bold text-white transition-all duration-300',
+                'flex-1 py-3 rounded-2xl font-black text-white transition-all duration-300',
                 isCounting
                   ? 'glass opacity-60 cursor-not-allowed'
                   : canStart
-                  ? 'btn-primary'
-                  : 'glass text-white/40 cursor-not-allowed',
+                  ? 'btn-arcade'
+                  : 'glass text-white/35 cursor-not-allowed',
               ].join(' ')}
             >
               {isCounting
@@ -229,7 +252,7 @@ export const Lobby: React.FC<Props> = ({ socket }) => {
           ) : (
             <div
               className="flex-1 py-3 glass rounded-2xl flex items-center
-                          justify-center text-white/40 text-sm italic"
+                          justify-center text-white/35 text-sm italic"
             >
               Waiting for host to start…
             </div>

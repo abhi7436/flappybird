@@ -20,6 +20,8 @@ const roomManager = new RoomManager();
 
 // ── Socket-to-room tracking (for cleanup on disconnect) ───────
 const socketRoomMap = new Map<string, { roomId: string; userId: string }>();
+/** Rooms currently in the 3-2-1 countdown — prevents double-start races */
+const countingDownRooms = new Set<string>();
 
 // ── Spectator tracking: socketId → roomId ─────────────────────
 const spectatorRoomMap = new Map<string, string>();
@@ -155,6 +157,13 @@ export async function initializeWebSocketServer(
           socket.emit('error', { message: 'Room is already closed', code: 'ROOM_CLOSED' });
           return;
         }
+        // Block late joiners from entering an already-active game.
+        // Exception: if this userId is already registered (reconnect), let them through.
+        const isReconnect = !!roomManager.findSocketIdForUser(roomId, user.userId);
+        if (roomMeta0.status === 'active' && !isReconnect) {
+          socket.emit('error', { message: 'Game is already in progress', code: 'GAME_ACTIVE' });
+          return;
+        }
 
         // 2. Duplicate / reconnect guard
         // If this userId is already registered in the room (e.g. reconnecting
@@ -225,6 +234,20 @@ export async function initializeWebSocketServer(
           playerId: socket.id,
           hostId:   roomMeta?.createdBy ?? user.userId,
         });
+
+        // Send the full current player list to the joining socket so its lobby is populated
+        const existingRoom = roomManager.getRoom(roomId);
+        const roomStatePlayers = existingRoom
+          ? Array.from(existingRoom.values()).map((p) => ({
+              userId:    p.userId,
+              username:  p.username,
+              avatar:    null,
+              ready:     false,
+              highScore: 0,
+            }))
+          : [];
+        socket.emit('room_state', { players: roomStatePlayers });
+
         io.to(roomId).emit('player_joined', {
           playerId: socket.id,
           userId:   user.userId,
@@ -272,7 +295,21 @@ export async function initializeWebSocketServer(
         scheduleBroadcast(io, roomId);
       }
     );
-
+    // ── powerup_activated ───────────────────────────────────────
+    socket.on(
+      'powerup_activated',
+      ({ roomId, type }: { roomId: string; type: string }) => {
+        if (typeof type !== 'string' || type.length > 40) return;
+        const player = roomManager.getPlayer(roomId, socket.id);
+        if (!player || !player.alive) return;
+        // Fan out to everyone else in the room
+        socket.to(roomId).emit('powerup_activated', {
+          userId:   user.userId,
+          username: user.username,
+          type,
+        });
+      }
+    );
     // ── game_over ────────────────────────────────────────
     socket.on(
       'game_over',
@@ -389,8 +426,30 @@ export async function initializeWebSocketServer(
         return;
       }
 
-      await RoomService.setStatus(roomId, 'active');
-      io.to(roomId).emit('game_started', { startedAt: Date.now() });
+      // Guard: already counting down (prevents double-tap / duplicate socket events)
+      if (countingDownRooms.has(roomId)) {
+        socket.emit('error', { message: 'Game is already starting', code: 'ALREADY_STARTED' });
+        return;
+      }
+
+      // Server-driven countdown: 3 → 2 → 1 → game_started
+      // Status stays 'waiting' until the countdown completes so late-joining clients
+      // still see the room as joinable during the 3s window.
+      countingDownRooms.add(roomId);
+      let n = 3;
+      const tick = () => {
+        io.to(roomId).emit('game_countdown', { n });
+        if (n === 0) {
+          countingDownRooms.delete(roomId);
+          RoomService.setStatus(roomId, 'active')
+            .then(() => io.to(roomId).emit('game_started', { startedAt: Date.now() }))
+            .catch((err) => console.error('[WS] Failed to activate room:', err));
+          return;
+        }
+        n--;
+        setTimeout(tick, 1000);
+      };
+      tick(); // emit n=3 immediately, then 2, 1, 0+start
     });
 
     // ── spectate_room ────────────────────────────────────
@@ -448,7 +507,16 @@ export async function initializeWebSocketServer(
       console.log(`[WS] Disconnected: ${socket.id} (${user.username})`);
       const info = socketRoomMap.get(socket.id);
       if (info) {
-        await handleLeave(socket, io, info.roomId, info.userId);
+        const meta = await RoomService.getMeta(info.roomId).catch(() => null);
+        if (meta?.status === 'active') {
+          // Mid-game disconnect: keep the player slot in roomManager so they
+          // can rejoin via join_room on reconnect without hitting GAME_ACTIVE.
+          // Only clean up the socket → room mapping.
+          socketRoomMap.delete(socket.id);
+          socket.leave(info.roomId);
+        } else {
+          await handleLeave(socket, io, info.roomId, info.userId);
+        }
       }
       // Clean spectator state
       const specRoomId = spectatorRoomMap.get(socket.id);

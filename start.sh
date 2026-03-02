@@ -3,9 +3,9 @@
 #  start.sh — Flappy Birds Multiplayer — local dev launcher
 #
 #  Usage:
-#    ./start.sh          # server + web (default, no Docker)
-#    ./start.sh mobile   # server + Expo (no Docker)
-#    ./start.sh all      # server + web + Expo (no Docker)
+#    ./start.sh          # server + web (default) → opens browser
+#    ./start.sh mobile   # server + Expo → opens browser + QR code
+#    ./start.sh all      # server + web + Expo
 #    ./start.sh stop     # stop all background processes
 #
 #  Assumes PostgreSQL (:5432) and Redis (:6379) are already
@@ -26,6 +26,25 @@ info()    { echo -e "${CYAN}▶  $*${RESET}"; }
 success() { echo -e "${GREEN}✔  $*${RESET}"; }
 warn()    { echo -e "${YELLOW}!  $*${RESET}"; }
 die()     { echo -e "${RED}✖  $*${RESET}" >&2; exit 1; }
+
+# ── Cross-platform browser opener ────────────────────────────
+open_browser() {
+  local url="$1"
+  if command -v open     >/dev/null 2>&1; then open     "$url"         # macOS
+  elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$url"      # Linux
+  elif command -v start  >/dev/null 2>&1; then start    "$url"         # Git Bash / WSL
+  else warn "Could not detect a browser opener — visit $url manually."
+  fi
+}
+
+# ── LAN IP (for Expo QR code) ────────────────────────────────
+LAN_IP=""
+if command -v ipconfig >/dev/null 2>&1; then    # macOS
+  LAN_IP="$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || true)"
+elif command -v hostname >/dev/null 2>&1; then  # Linux
+  LAN_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+fi
+[[ -z "$LAN_IP" ]] && LAN_IP="localhost"
 
 # ── Stop command ──────────────────────────────────────────────
 if [[ "$MODE" == "stop" ]]; then
@@ -69,20 +88,23 @@ nc -z localhost 6379 2>/dev/null \
   && success "Redis is reachable." \
   || die "Redis is not running on :6379.\n   Start it with: brew services start redis  (or your local equivalent)"
 
+# ── Server dependencies ───────────────────────────────────────
+# Always run npm install so missing/partial node_modules are healed.
+# npm ci is a no-op when package-lock.json hasn't changed.
+info "Installing server dependencies…"
+cd "$ROOT" && npm install --prefer-offline --silent
+
 # ── Auto-provision DB (idempotent) ────────────────────────────
 info "Ensuring database + schema are up to date…"
 node "$ROOT/scripts/setup-local-db.js" || die "Database setup failed. See above."
-
-# ── Server dependencies ───────────────────────────────────────
-if [[ ! -d "$ROOT/node_modules" ]]; then
-  info "Installing server dependencies…"
-  cd "$ROOT" && npm install
-fi
 
 # ── Backend dev server ────────────────────────────────────────
 info "Starting backend server (ts-node-dev)…"
 LOG_SERVER="$LOG_DIR/server.log"
 cd "$ROOT"
+# Extend CORS_ORIGIN so LAN devices (phones on the same Wi-Fi) are allowed.
+# dotenv won't override env vars already set in the shell environment.
+export CORS_ORIGIN="http://localhost:3000,http://${LAN_IP}:3000"
 nohup npm run dev < /dev/null > "$LOG_SERVER" 2>&1 &
 SERVER_PID=$!
 echo "$SERVER_PID" >> "$PID_FILE"
@@ -105,10 +127,8 @@ done
 if [[ "$MODE" == "dev" || "$MODE" == "all" ]]; then
   WEB_DIR="$ROOT/web"
   if [[ -d "$WEB_DIR" ]]; then
-    if [[ ! -d "$WEB_DIR/node_modules" ]]; then
-      info "Installing web dependencies…"
-      cd "$WEB_DIR" && npm install
-    fi
+    info "Installing web dependencies…"
+    cd "$WEB_DIR" && npm install --prefer-offline --silent
     info "Starting web client (Vite)…"
     LOG_WEB="$LOG_DIR/web.log"
     cd "$WEB_DIR"
@@ -116,6 +136,29 @@ if [[ "$MODE" == "dev" || "$MODE" == "all" ]]; then
     WEB_PID=$!
     echo "$WEB_PID" >> "$PID_FILE"
     success "Web client started  (PID $WEB_PID) — logs: $LOG_WEB"
+
+    # Wait for Vite to be ready, then open the browser
+    info "Waiting for web client on :3000…"
+    for i in $(seq 1 20); do
+      if nc -z localhost 3000 2>/dev/null; then
+        WEB_LAN_URL="http://${LAN_IP}:3000"
+        success "Web client is ready."
+        echo ""
+        echo -e "${BOLD}  ┌─────────────────────────────────────────┐${RESET}"
+        echo -e "${BOLD}  │   Scan to open in browser / Expo Go     │${RESET}"
+        echo -e "${BOLD}  └─────────────────────────────────────────┘${RESET}"
+        echo ""
+        npx --yes qrcode-terminal "$WEB_LAN_URL" 2>/dev/null || \
+          warn "npx qrcode-terminal failed — open manually: $WEB_LAN_URL"
+        echo ""
+        echo -e "  ${BOLD}Desktop${RESET}  →  http://localhost:3000"
+        echo -e "  ${BOLD}Mobile ${RESET}  →  ${WEB_LAN_URL}  (same Wi-Fi)"
+        echo ""
+        open_browser "http://localhost:3000"
+        break
+      fi
+      sleep 1
+    done
   fi
 fi
 
@@ -123,18 +166,47 @@ fi
 if [[ "$MODE" == "mobile" || "$MODE" == "all" ]]; then
   MOBILE_DIR="$ROOT/mobile"
   if [[ -d "$MOBILE_DIR" ]]; then
-    if [[ ! -d "$MOBILE_DIR/node_modules" ]]; then
-      info "Installing mobile dependencies…"
-      cd "$MOBILE_DIR" && npm install
-    fi
-    info "Starting Expo dev server…"
+    info "Installing mobile dependencies…"
+    cd "$MOBILE_DIR" && npm install --prefer-offline --silent
+    info "Starting Expo dev server (LAN mode — phone must be on the same Wi-Fi)…"
     LOG_MOBILE="$LOG_DIR/mobile.log"
     cd "$MOBILE_DIR"
-    nohup npx expo start --tunnel < /dev/null > "$LOG_MOBILE" 2>&1 &
+    # --lan: uses your local network IP so Expo Go on a real device can connect
+    # without needing an Expo account or internet tunnel.
+    EXPO_PUBLIC_API_URL="http://${LAN_IP}:3001" \
+      nohup npx expo start --lan < /dev/null > "$LOG_MOBILE" 2>&1 &
     MOBILE_PID=$!
     echo "$MOBILE_PID" >> "$PID_FILE"
     success "Expo started  (PID $MOBILE_PID) — logs: $LOG_MOBILE"
-    warn "Scan the QR code in $LOG_MOBILE with Expo Go to open on a device."
+
+    # Wait for Metro bundler port 8081, then show QR + open DevTools
+    info "Waiting for Metro bundler on :8081…"
+    for i in $(seq 1 30); do
+      if nc -z localhost 8081 2>/dev/null; then
+        EXPO_URL="exp://${LAN_IP}:8081"
+        success "Metro is ready."
+
+        echo ""
+        echo -e "${BOLD}  ┌─────────────────────────────────────────┐${RESET}"
+        echo -e "${BOLD}  │        Scan with Expo Go on your phone  │${RESET}"
+        echo -e "${BOLD}  └─────────────────────────────────────────┘${RESET}"
+        echo ""
+
+        # Print QR code inline using qrcode-terminal (no install needed via npx)
+        npx --yes qrcode-terminal "$EXPO_URL" 2>/dev/null || \
+          warn "npx qrcode-terminal failed — open Expo Go and enter: $EXPO_URL"
+
+        echo ""
+        echo -e "  ${BOLD}Expo Go URL :${RESET}  $EXPO_URL"
+        echo -e "  ${BOLD}API URL     :${RESET}  http://${LAN_IP}:3001"
+        echo ""
+
+        # Open Expo DevTools in the browser
+        open_browser "http://localhost:8081"
+        break
+      fi
+      sleep 1
+    done
   fi
 fi
 
@@ -142,11 +214,12 @@ fi
 echo ""
 echo -e "${BOLD}${GREEN}━━━━━━━━━━  All services running  ━━━━━━━━━━${RESET}"
 echo ""
-echo -e "  ${BOLD}API server${RESET}   →  http://localhost:3001"
+echo -e "  ${BOLD}API server${RESET}   →  http://localhost:3001  (LAN: http://${LAN_IP}:3001)"
 [[ "$MODE" == "dev" || "$MODE" == "all" ]] && \
-  echo -e "  ${BOLD}Web client${RESET}   →  http://localhost:3000"
+  echo -e "  ${BOLD}Web (desktop)${RESET} →  http://localhost:3000" && \
+  echo -e "  ${BOLD}Web (mobile) ${RESET} →  http://${LAN_IP}:3000   ← open on your phone"
 [[ "$MODE" == "mobile" || "$MODE" == "all" ]] && \
-  echo -e "  ${BOLD}Expo / mobile${RESET}→  see $LOG_DIR/mobile.log"
+  echo -e "  ${BOLD}Expo / mobile${RESET}→  exp://${LAN_IP}:8081  (Expo Go on same Wi-Fi)"
 echo ""
 echo -e "  Logs → ${LOG_DIR}/"
 echo -e "  Stop → ${BOLD}./start.sh stop${RESET}"

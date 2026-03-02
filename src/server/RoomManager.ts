@@ -31,7 +31,9 @@ export class RoomManager {
     const room = this.getOrCreateRoom(roomId);
     room.set(player.id, player);
     RoomService.incrementPlayerCount(roomId, 1).catch(() => {});
-    RoomService.setStatus(roomId, 'active').catch(() => {});
+    // NOTE: do NOT call setStatus here — status transitions are managed
+    // exclusively by the start_game handler (waiting → active) and room
+    // close logic. Setting active on every join broke multi-player joining.
     return true;
   }
 

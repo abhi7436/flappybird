@@ -2,15 +2,76 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ── Root variables ──────────────────────────────────────── */
-:root {
-  --sky-top:    #87CEEB;
-  --sky-bottom: #B0E0FF;
-  --ground:     #8B6914;
-  --pipe:       #4CAF50;
-  font-family: 'Nunito', sans-serif;
+/* ── Box-sizing reset (mobile-first) ───────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
 }
 
+/* ── Root layout ────────────────────────────── */
+html {
+  /* dvh = dynamic viewport height (shrinks when mobile browser chrome appears) */
+  height: 100%;
+  height: 100dvh;
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
+}
+body {
+  height: 100%;
+  height: 100dvh;
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+  overflow-y: hidden;
+  /* Prevent pull-to-refresh / overscroll bounce on iOS Safari */
+  overscroll-behavior: none;
+}
+#root {
+  height: 100%;
+  height: 100dvh;
+  overflow: hidden;
+  /* Safe-area insets for notch/home-bar on iOS */
+  padding-top:    env(safe-area-inset-top,    0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left:   env(safe-area-inset-left,   0px);
+  padding-right:  env(safe-area-inset-right,  0px);
+}
+
+/* ── No horizontal overflow anywhere ─────────────────── */
+img, video, canvas {
+  max-width: 100%;
+}
+
+/* ── Touch optimisation ──────────────────────────── */
+button, a, [role="button"] {
+  /* Removes the 300 ms tap delay on mobile browsers */
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  /* Ensure every interactive element is at least 44 × 44 pt */
+  min-height: 44px;
+  cursor: pointer;
+}
+/* Override for non-interactive elements that accidentally inherit */
+input, textarea, select {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  min-height: unset;
+}
+
+/* ── Root variables ──────────────────────────────────────── */
+:root {
+  --sky-top:     #87CEEB;
+  --sky-bottom:  #B0E0FF;
+  --ground:      #8B6914;
+  --pipe:        #4CAF50;
+  /* Arcade neon palette */
+  --neon-yellow: #FFE000;
+  --neon-orange: #FF5A1F;
+  --neon-pink:   #FF2EF7;
+  --neon-cyan:   #00F0FF;
+  --neon-green:  #00FF94;
+  --neon-purple: #9333EA;
+  font-family: 'Nunito', sans-serif;
+}
 .dark {
   --sky-top:    #0F0C29;
   --sky-bottom: #302B63;
@@ -18,56 +79,187 @@
   --pipe:       #2E7D32;
 }
 
-/* ── Glassmorphism utility ───────────────────────────────── */
+/* ════════════════════════════════════════════════════════════
+   Keyframes
+   ════════════════════════════════════════════════════════════ */
+@keyframes shimmer {
+  0%   { transform: translateX(-120%) skewX(-12deg); }
+  100% { transform: translateX(260%)  skewX(-12deg); }
+}
+@keyframes neon-pulse {
+  0%, 100% {
+    text-shadow:
+      0 0 8px  var(--neon-yellow),
+      0 0 24px var(--neon-orange);
+    opacity: 1;
+  }
+  50% {
+    text-shadow:
+      0 0 18px var(--neon-yellow),
+      0 0 50px var(--neon-orange),
+      0 0 80px var(--neon-pink);
+    opacity: 0.92;
+  }
+}
+@keyframes champion-glow {
+  0%, 100% {
+    box-shadow:
+      0 0 24px rgba(255,215,0,0.50),
+      0 0 48px rgba(255,215,0,0.25),
+      inset 0 0 24px rgba(255,215,0,0.10);
+  }
+  50% {
+    box-shadow:
+      0 0 48px rgba(255,215,0,0.85),
+      0 0 96px rgba(255,215,0,0.55),
+      inset 0 0 48px rgba(255,215,0,0.20);
+  }
+}
+@keyframes score-burst {
+  0%   { transform: scale(1);   color: #ffffff; filter: none; }
+  30%  { transform: scale(1.55); color: var(--neon-yellow); filter: drop-shadow(0 0 12px var(--neon-yellow)); }
+  65%  { transform: scale(1.18); }
+  100% { transform: scale(1);   color: #ffffff; filter: none; }
+}
+@keyframes float-bird {
+  0%, 100% { transform: translateY(0)    rotate(-4deg); }
+  50%       { transform: translateY(-16px) rotate(4deg);  }
+}
+@keyframes confetti-fall-1 {
+  0%   { transform: translateY(-10px)  rotate(0deg);   opacity: 1; }
+  100% { transform: translateY(120vh)  rotate(720deg); opacity: 0; }
+}
+@keyframes confetti-fall-2 {
+  0%   { transform: translateY(-10px)  rotate(0deg)   translateX(0);   opacity: 1; }
+  100% { transform: translateY(120vh)  rotate(-540deg) translateX(80px); opacity: 0; }
+}
+@keyframes confetti-fall-3 {
+  0%   { transform: translateY(-10px)  rotate(45deg)   translateX(0);    opacity: 1; }
+  100% { transform: translateY(110vh)  rotate(1080deg) translateX(-60px); opacity: 0; }
+}
+@keyframes xp-fill {
+  from { width: 0%; }
+  to   { width: var(--xp-target, 70%); }
+}
+@keyframes rank-pop {
+  0%   { transform: scale(0)   rotate(-20deg); }
+  60%  { transform: scale(1.2) rotate(5deg);  }
+  100% { transform: scale(1)   rotate(0deg);  }
+}
+@keyframes badge-glow {
+  0%, 100% { box-shadow: 0 0 8px  rgba(16,185,129,0.5); }
+  50%       { box-shadow: 0 0 20px rgba(16,185,129,1),  0 0 35px rgba(16,185,129,0.5); }
+}
+@keyframes neon-border-pulse {
+  0%, 100% { border-color: rgba(255,224,0,0.35); box-shadow: 0 0 8px  rgba(255,224,0,0.15); }
+  50%       { border-color: rgba(255,224,0,0.9);  box-shadow: 0 0 24px rgba(255,224,0,0.55); }
+}
+@keyframes star-twinkle {
+  0%, 100% { opacity: 0.3; transform: scale(1);   }
+  50%       { opacity: 1;   transform: scale(1.4); }
+}
+@keyframes slide-in-up {
+  from { transform: translateY(30px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+@keyframes crown-bounce {
+  0%, 100% { transform: translateY(0) rotate(-5deg);  }
+  50%       { transform: translateY(-6px) rotate(5deg); }
+}
+
+/* ════════════════════════════════════════════════════════════
+   Glassmorphism
+   ════════════════════════════════════════════════════════════ */
 .glass {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(255,255,255,0.10);
   backdrop-filter: blur(16px) saturate(140%);
   -webkit-backdrop-filter: blur(16px) saturate(140%);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255,255,255,0.18);
 }
-
 .glass-dark {
-  background: rgba(0, 0, 0, 0.25);
-  backdrop-filter: blur(16px) saturate(140%);
-  -webkit-backdrop-filter: blur(16px) saturate(140%);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0,0,0,0.32);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border: 1px solid rgba(255,255,255,0.08);
+}
+.glass-gold {
+  background: rgba(255,215,0,0.08);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border: 1px solid rgba(255,215,0,0.30);
 }
 
-/* ── Gradient text ───────────────────────────────────────── */
+/* ════════════════════════════════════════════════════════════
+   Gradient text
+   ════════════════════════════════════════════════════════════ */
 .gradient-text {
-  background: linear-gradient(135deg, #FFD700, #FF6B35);
+  background: linear-gradient(180deg, #FFFFFF 0%, #FFD700 40%, #FF9500 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
-
 .gradient-text-blue {
   background: linear-gradient(135deg, #63B3ED, #9F7AEA);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
-
-/* ── Button styles ───────────────────────────────────────── */
-.btn-primary {
-  @apply inline-flex items-center justify-center gap-2 px-6 py-3
-         rounded-2xl font-bold text-white select-none cursor-pointer
-         transition-all duration-200 active:scale-95;
-  background: linear-gradient(135deg, #FFD700, #FF6B35);
-  box-shadow: 0 4px 16px rgba(255, 107, 53, 0.4);
+.gradient-text-neon {
+  background: linear-gradient(135deg, #00F0FF 0%, #00FF94 50%, #FFE000 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
-.btn-primary:hover { filter: brightness(1.08); transform: translateY(-1px); }
+/* ════════════════════════════════════════════════════════════
+   Arcade title
+   ════════════════════════════════════════════════════════════ */
+.arcade-title {
+  background: linear-gradient(180deg, #FFFFFF 0%, #FFD700 45%, #FF9500 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: neon-pulse 3s ease-in-out infinite;
+  filter: drop-shadow(0 0 14px rgba(255,165,0,0.65));
+  letter-spacing: -0.025em;
+}
+
+/* ════════════════════════════════════════════════════════════
+   Buttons
+   ════════════════════════════════════════════════════════════ */
+.btn-primary {
+  @apply inline-flex items-center justify-center gap-2 px-6 py-3
+         rounded-2xl font-black text-white select-none cursor-pointer
+         transition-all duration-200 active:scale-95 relative overflow-hidden;
+  background: linear-gradient(135deg, #FFD700 0%, #FF9500 50%, #FF4500 100%);
+  box-shadow: 0 4px 20px rgba(255,107,53,0.50), 0 0 0 0 rgba(255,200,0,0);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.25);
+}
+.btn-primary::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.38) 50%, transparent 100%);
+  transform: translateX(-120%) skewX(-12deg);
+}
+.btn-primary:hover::after { animation: shimmer 0.55s ease forwards; }
+.btn-primary:hover {
+  filter: brightness(1.12);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 32px rgba(255,107,53,0.7), 0 0 24px rgba(255,200,0,0.35);
+}
 
 .btn-secondary {
   @apply inline-flex items-center justify-center gap-2 px-6 py-3
          rounded-2xl font-bold select-none cursor-pointer
-         transition-all duration-200 active:scale-95;
+         transition-all duration-200 active:scale-95 relative overflow-hidden;
   @apply glass text-white;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.20);
 }
-
-.btn-secondary:hover { background: rgba(255,255,255,0.2); transform: translateY(-1px); }
+.btn-secondary:hover {
+  background: rgba(255,255,255,0.18);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.30), 0 0 14px rgba(255,255,255,0.10);
+}
 
 .btn-danger {
   @apply inline-flex items-center justify-center gap-2 px-6 py-3
@@ -75,13 +267,365 @@
          transition-all duration-200 active:scale-95 bg-red-500 hover:bg-red-600;
 }
 
-/* ── Scrollbar ───────────────────────────────────────────── */
-::-webkit-scrollbar      { width: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.3); border-radius: 3px; }
+/* Big arcade CTA */
+.btn-arcade {
+  @apply inline-flex items-center justify-center gap-2 px-8 py-4
+         rounded-2xl font-black text-white select-none cursor-pointer
+         transition-all duration-200 active:scale-95 relative overflow-hidden
+         tracking-wider uppercase;
+  background: linear-gradient(135deg, #FFD700 0%, #FF9500 45%, #FF4500 100%);
+  box-shadow:
+    0 6px 32px rgba(255,107,0,0.60),
+    0 2px 0 rgba(0,0,0,0.28) inset,
+    0 -2px 0 rgba(255,255,255,0.15) inset;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.35);
+  font-size: 1.1rem;
+}
+.btn-arcade::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.42) 50%, transparent 100%);
+  transform: translateX(-120%) skewX(-12deg);
+}
+.btn-arcade:hover::after { animation: shimmer 0.52s ease forwards; }
+.btn-arcade:hover {
+  filter: brightness(1.15);
+  transform: translateY(-3px);
+  box-shadow:
+    0 12px 42px rgba(255,107,0,0.75),
+    0 0 32px rgba(255,200,0,0.45),
+    0 2px 0 rgba(0,0,0,0.28) inset;
+}
 
-/* ── Canvas crisp rendering ──────────────────────────────── */
+/* ════════════════════════════════════════════════════════════
+   Score display
+   ════════════════════════════════════════════════════════════ */
+.score-display {
+  font-family: 'Nunito', sans-serif;
+  font-weight: 900;
+  font-size: clamp(2.5rem, 8vw, 4rem);
+  line-height: 1;
+  color: #ffffff;
+  text-shadow: 0 0 12px rgba(255,255,255,0.30), 0 2px 4px rgba(0,0,0,0.55);
+  letter-spacing: -0.02em;
+}
+.score-display.pop {
+  animation: score-burst 0.38s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+}
+
+/* ════════════════════════════════════════════════════════════
+   Champion card
+   ════════════════════════════════════════════════════════════ */
+.champion-card { animation: champion-glow 2s ease-in-out infinite; }
+.crown-bounce  { animation: crown-bounce 1.8s ease-in-out infinite; }
+
+/* ════════════════════════════════════════════════════════════
+   Neon glass
+   ════════════════════════════════════════════════════════════ */
+.neon-glass {
+  background: rgba(0,0,0,0.38);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(255,224,0,0.28);
+  animation: neon-border-pulse 3.2s ease-in-out infinite;
+}
+
+/* ════════════════════════════════════════════════════════════
+   XP bar
+   ════════════════════════════════════════════════════════════ */
+.xp-bar-track {
+  @apply relative h-3 rounded-full overflow-hidden;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.12);
+}
+.xp-bar-fill {
+  @apply h-full rounded-full;
+  background: linear-gradient(90deg, #FFD700, #FF9500, #FF4500);
+  box-shadow: 0 0 10px rgba(255,165,0,0.6);
+  animation: xp-fill 1.3s cubic-bezier(0.16, 1, 0.3, 1) 0.6s both;
+}
+
+/* ════════════════════════════════════════════════════════════
+   Confetti
+   ════════════════════════════════════════════════════════════ */
+.confetti-wrap {
+  position: fixed; inset: 0;
+  pointer-events: none;
+  z-index: 60;
+  overflow: hidden;
+}
+.confetti-piece {
+  position: absolute;
+  top: -20px;
+  width: 10px; height: 10px;
+  border-radius: 2px;
+  opacity: 0;
+}
+.confetti-piece:nth-child(1)  { left:  5%; background: #FFD700; animation: confetti-fall-1 2.4s 0.00s ease-in forwards; }
+.confetti-piece:nth-child(2)  { left: 12%; background: #FF5A1F; animation: confetti-fall-2 2.6s 0.10s ease-in forwards; width:7px;  height:14px; }
+.confetti-piece:nth-child(3)  { left: 20%; background: #00F0FF; animation: confetti-fall-3 2.2s 0.20s ease-in forwards; border-radius:50%; }
+.confetti-piece:nth-child(4)  { left: 28%; background: #FF2EF7; animation: confetti-fall-1 2.8s 0.05s ease-in forwards; width:8px;  height:8px;  border-radius:50%; }
+.confetti-piece:nth-child(5)  { left: 36%; background: #00FF94; animation: confetti-fall-2 2.4s 0.15s ease-in forwards; }
+.confetti-piece:nth-child(6)  { left: 44%; background: #FFD700; animation: confetti-fall-3 2.6s 0.30s ease-in forwards; width:12px; height:6px; }
+.confetti-piece:nth-child(7)  { left: 52%; background: #FF5A1F; animation: confetti-fall-1 2.3s 0.08s ease-in forwards; border-radius:50%; }
+.confetti-piece:nth-child(8)  { left: 60%; background: #00F0FF; animation: confetti-fall-2 2.7s 0.00s ease-in forwards; width:6px;  height:12px; }
+.confetti-piece:nth-child(9)  { left: 68%; background: #9333EA; animation: confetti-fall-3 2.5s 0.12s ease-in forwards; }
+.confetti-piece:nth-child(10) { left: 76%; background: #FFD700; animation: confetti-fall-1 2.4s 0.25s ease-in forwards; border-radius:50%; width:8px; height:8px; }
+.confetti-piece:nth-child(11) { left: 84%; background: #FF2EF7; animation: confetti-fall-2 2.6s 0.05s ease-in forwards; }
+.confetti-piece:nth-child(12) { left: 92%; background: #00FF94; animation: confetti-fall-3 2.8s 0.32s ease-in forwards; width:7px;  height:7px;  border-radius:50%; }
+.confetti-piece:nth-child(13) { left:  2%; background: #00F0FF; animation: confetti-fall-1 2.5s 0.18s ease-in forwards; }
+.confetti-piece:nth-child(14) { left: 48%; background: #9333EA; animation: confetti-fall-2 2.3s 0.40s ease-in forwards; width:9px;  height:5px; }
+.confetti-piece:nth-child(15) { left: 96%; background: #FF5A1F; animation: confetti-fall-3 2.7s 0.14s ease-in forwards; border-radius:50%; }
+
+/* ════════════════════════════════════════════════════════════
+   Utility animations
+   ════════════════════════════════════════════════════════════ */
+.rank-pop    { animation: rank-pop   0.6s cubic-bezier(0.175,0.885,0.32,1.275) forwards; }
+.ready-glow  { animation: badge-glow 1.6s ease-in-out infinite; }
+.star-twinkle{ animation: star-twinkle 2.5s ease-in-out infinite; }
+
+/* ════════════════════════════════════════════════════════════
+   Skin selector card
+   ════════════════════════════════════════════════════════════ */
+.skin-card {
+  @apply flex flex-col items-center gap-1.5 p-3 rounded-2xl border-2
+         transition-all duration-200 cursor-pointer select-none;
+  border-color: transparent;
+  background: rgba(255,255,255,0.05);
+}
+.skin-card:hover:not(:disabled) {
+  background: rgba(255,255,255,0.12);
+  transform: translateY(-2px);
+}
+.skin-card.active {
+  border-color: rgba(255,255,255,0.7);
+  background: rgba(255,255,255,0.12);
+  transform: scale(1.08);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.35);
+}
+.skin-card.locked {
+  opacity: 0.32;
+  cursor: not-allowed;
+  filter: grayscale(0.6);
+}
+
+/* ════════════════════════════════════════════════════════════
+   Eliminated badge
+   ════════════════════════════════════════════════════════════ */
+.eliminated-badge {
+  @apply text-xs font-bold px-1.5 py-0.5 rounded-md;
+  background: rgba(239,68,68,0.2);
+  color: #f87171;
+  border: 1px solid rgba(239,68,68,0.35);
+}
+
+/* ════════════════════════════════════════════════════════════
+   Screen shake
+   ════════════════════════════════════════════════════════════ */
+@keyframes screen-shake {
+  0%, 100% { transform: translate(0, 0)     rotate(0deg);    }
+  14%      { transform: translate(-7px,-5px) rotate(-1.8deg); }
+  28%      { transform: translate( 6px, 5px) rotate( 1.4deg); }
+  42%      { transform: translate(-5px, 4px) rotate(-0.9deg); }
+  56%      { transform: translate( 5px,-4px) rotate( 1.1deg); }
+  70%      { transform: translate(-3px, 3px) rotate(-0.6deg); }
+  84%      { transform: translate( 2px,-2px) rotate( 0.3deg); }
+}
+.screen-shake {
+  animation: screen-shake 0.44s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+  transform-origin: center center;
+}
+
+/* ════════════════════════════════════════════════════════════
+   Comic "Oops!" speech bubble
+   ════════════════════════════════════════════════════════════ */
+@keyframes oops-pop {
+  0%   { transform: scale(0)    rotate(-12deg); opacity: 0; }
+  55%  { transform: scale(1.24) rotate(  7deg); opacity: 1; }
+  75%  { transform: scale(0.93) rotate( -2deg); opacity: 1; }
+  100% { transform: scale(1)    rotate(  3deg); opacity: 1; }
+}
+.comic-bubble {
+  background:   #FFFDE7;
+  border:       3px solid #1a1a1a;
+  border-radius: 18px;
+  padding:       6px 16px;
+  font-family:  'Nunito', sans-serif;
+  font-weight:   900;
+  font-size:     1.35rem;
+  color:         #1a1a1a;
+  filter:        drop-shadow(3px 4px 0 rgba(0,0,0,0.45));
+  animation:     oops-pop 0.38s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+  pointer-events: none;
+  white-space:   nowrap;
+  position:      relative;
+}
+.comic-bubble::after {
+  content: '';
+  position: absolute;
+  bottom: -15px; left: 22px;
+  width: 0; height: 0;
+  border-left:  10px solid transparent;
+  border-right:  6px solid transparent;
+  border-top:   15px solid #1a1a1a;
+}
+.comic-bubble::before {
+  content: '';
+  position: absolute;
+  bottom: -11px; left: 24px;
+  width: 0; height: 0;
+  border-left:  8px solid transparent;
+  border-right: 5px solid transparent;
+  border-top:  12px solid #FFFDE7;
+  z-index: 1;
+}
+
+/* ════════════════════════════════════════════════════════════
+   In-game counter pill  (coins / bugs / timer)
+   ════════════════════════════════════════════════════════════ */
+@keyframes coin-flash {
+  0%   { transform: scale(1);    filter: brightness(1);   }
+  40%  { transform: scale(1.45); filter: brightness(1.75); }
+  100% { transform: scale(1);    filter: brightness(1);   }
+}
+.counter-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(0,0,0,0.50);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  border: 1px solid rgba(255,255,255,0.16);
+  border-radius: 999px;
+  padding: 3px 11px 3px 8px;
+  font-family: 'Nunito', sans-serif;
+  font-weight: 800;
+  font-size: 0.80rem;
+  color: #fff;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+}
+.coin-flash { animation: coin-flash 0.3s ease forwards; }
+
+/* ════════════════════════════════════════════════════════════
+   In-game mini leaderboard overlay
+   ════════════════════════════════════════════════════════════ */
+.mini-lb-overlay {
+  background: rgba(0,0,0,0.54);
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+/* ════════════════════════════════════════════════════════════
+   Game timer text
+   ════════════════════════════════════════════════════════════ */
+.game-timer {
+  font-family:    'Nunito', sans-serif;
+  font-weight:    900;
+  font-size:      0.82rem;
+  letter-spacing: 0.07em;
+  color:          rgba(255,255,255,0.82);
+  text-shadow:    0 1px 4px rgba(0,0,0,0.55);
+}
+
+/* ════════════════════════════════════════════════════════════
+   Scrollbar / canvas / body
+   ════════════════════════════════════════════════════════════ */
+::-webkit-scrollbar       { width: 6px; }
+::-webkit-scrollbar-track  { background: transparent; }
+::-webkit-scrollbar-thumb  { background: rgba(255,255,255,0.3); border-radius: 3px; }
+
 canvas { image-rendering: pixelated; image-rendering: crisp-edges; }
+body   { overflow: hidden; background: #020B18; }
 
-/* ── Prevent body scroll on game screen ─────────────────── */
-body { overflow: hidden; background: #0F0C29; }
+/* ════════════════════════════════════════════════════════════
+   Phase 2 — New gameplay overlays
+   ════════════════════════════════════════════════════════════ */
+
+/* ── Fog overlay (canvas-drawn, but also CSS fade wrapper) ──────────── */
+@keyframes fog-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes fog-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+.fog-in  { animation: fog-in  0.9s ease forwards; }
+.fog-out { animation: fog-out 1.2s ease forwards; }
+
+/* ── Lightning screen flash ─────────────────────────────────────────── */
+@keyframes lightning-flash {
+  0%   { opacity: 0.9; }
+  30%  { opacity: 0.7; }
+  60%  { opacity: 0.4; }
+  100% { opacity: 0; }
+}
+
+.lightning-overlay {
+  position:         absolute;
+  inset:            0;
+  border-radius:    1rem;
+  pointer-events:   none;
+  background:       rgba(220, 235, 255, 0.88);
+  animation:        lightning-flash 0.38s ease-out forwards;
+}
+
+/* ── Poop button ────────────────────────────────────────────────────── */
+.poop-btn {
+  position:         absolute;
+  width:            44px;
+  height:           44px;
+  border-radius:    50%;
+  background:       rgba(0, 0, 0, 0.42);
+  border:           1.5px solid rgba(255,255,255,0.22);
+  display:          flex;
+  align-items:      center;
+  justify-content:  center;
+  font-size:        1.25rem;
+  cursor:           pointer;
+  backdrop-filter:  blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  box-shadow:       0 2px 12px rgba(0,0,0,0.38);
+  transition:       transform 0.08s, background 0.12s;
+  user-select:      none;
+}
+
+.poop-btn:hover   { background: rgba(0, 0, 0, 0.62); }
+.poop-btn:active  { transform: scale(0.90); }
+
+/* Cooldown ring (SVG-based) */
+.poop-cooldown-ring {
+  position:   absolute;
+  inset:      -3px;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+/* ── Wind direction indicator ───────────────────────────────────────── */
+@keyframes wind-drift-right {
+  from { transform: translateX(-6px); opacity: 0; }
+  50%  { opacity: 0.7; }
+  to   { transform: translateX( 6px); opacity: 0; }
+}
+@keyframes wind-drift-left {
+  from { transform: translateX( 6px); opacity: 0; }
+  50%  { opacity: 0.7; }
+  to   { transform: translateX(-6px); opacity: 0; }
+}
+
+.wind-right { animation: wind-drift-right 0.9s ease-in-out infinite; }
+.wind-left  { animation: wind-drift-left  0.9s ease-in-out infinite; }
+
+/* ── Coin flash (existing, kept here for reference) ─────────────────── */
+@keyframes coin-collect-pop {
+  0%   { transform: scale(1.0); opacity: 1; }
+  50%  { transform: scale(1.6); opacity: 0.8; }
+  100% { transform: scale(0.0); opacity: 0; }
+}
+
+.coin-collect { animation: coin-collect-pop 0.32s ease-out forwards; }
+

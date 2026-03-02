@@ -17,6 +17,8 @@ export interface BirdState {
 }
 
 export class Bird {
+  static readonly DEFAULT_JUMP_STRENGTH = -9;
+
   private state: BirdState;
   private gravity: number;
   private jumpStrength: number;
@@ -52,6 +54,19 @@ export class Bird {
   /** Set gravity (used by difficulty scaling). */
   setGravity(gravity: number): void {
     this.gravity = gravity;
+  }
+
+  /** Override jump velocity (used by turbo-jump effect). */
+  setJumpStrength(strength: number): void {
+    this.jumpStrength = strength;
+  }
+
+  /**
+   * Nudge the bird's vertical velocity — used by the wind event.
+   * Positive dv = pushes downward; negative = upward.
+   */
+  addVerticalVelocity(dv: number): void {
+    this.state.velocity += dv;
   }
 
   getState(): Readonly<BirdState> {

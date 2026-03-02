@@ -34,6 +34,13 @@ export interface LeaderboardUpdate {
   isFinal:   boolean;
 }
 
+/** Emitted by a player when they collect a power-up */
+export interface PowerUpActivatedPayload {
+  userId:   string;
+  username: string;
+  type:     string;
+}
+
 /** Payload of the final_ranking WS event (per-player) */
 export interface FinalRankingPayload {
   rank:         number;
@@ -67,15 +74,28 @@ export interface RoomInfo {
   status:      'waiting' | 'active' | 'closed';
 }
 
-export type BirdSkinId = 'classic' | 'blue' | 'red' | 'gold' | 'neon' | 'galaxy';
+export type BirdSkinId =
+  | 'classic'
+  | 'blue'
+  | 'red'
+  | 'gold'
+  | 'neon'
+  | 'galaxy'
+  | 'inferno'
+  | 'aqua'
+  | 'thunder'
+  | 'shadow'
+  | 'rainbow';
 
 export interface BirdSkin {
-  id: BirdSkinId;
-  name: string;
-  bodyColor: string;
-  wingColor: string;
-  eyeColor: string;
-  beakColor: string;
+  id:          BirdSkinId;
+  name:        string;
+  emoji:       string;
+  bodyColor:   string;
+  wingColor:   string;
+  eyeColor:    string;
+  beakColor:   string;
   unlockScore: number;
-  glowColor?: string;
+  glowColor?:  string;
+  rarity?:     'common' | 'rare' | 'epic' | 'legendary';
 }

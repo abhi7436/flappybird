@@ -5,14 +5,16 @@ import {
   FinalRankingPayload,
   LeaderboardEntry,
   LeaderboardUpdate,
+  PowerUpActivatedPayload,
 } from '../types';
 import { loadToken, clearAuthStorage } from '../services/authStorage';
+import { LeaderboardSync } from '../sync';
 
 type RoomJoinedPayload  = { roomId: string; playerId: string; hostId: string };
 type PlayerJoinedPayload = { playerId: string; userId: string; username: string };
 type PlayerLeftPayload   = { userId: string };
 type RoomClosedPayload   = { reason: string };
-type ErrorPayload        = { message: string };
+type ErrorPayload        = { message: string; code?: string };
 
 const WS_URL = import.meta.env.VITE_WS_URL ?? '';
 
@@ -24,6 +26,7 @@ export function useWebSocket(): Socket | null {
     setScreen,
     setUser,
     setRoom,
+    setRoomPlayers,
     setLeaderboard,
     setFinalRanking,
     setScore,
@@ -32,12 +35,15 @@ export function useWebSocket(): Socket | null {
     addRoomPlayer,
     removeRoomPlayer,
     setWsError,
+    setPlayerPowerUp,
+    setCountdown,
   } = useGameStore((s) => ({
     user:             s.user,
     leaderboard:      s.leaderboard,
     setScreen:        s.setScreen,
     setUser:          s.setUser,
     setRoom:          s.setRoom,
+    setRoomPlayers:   s.setRoomPlayers,
     setLeaderboard:   s.setLeaderboard,
     setFinalRanking:  s.setFinalRanking,
     setScore:         s.setScore,
@@ -46,6 +52,8 @@ export function useWebSocket(): Socket | null {
     addRoomPlayer:    s.addRoomPlayer,
     removeRoomPlayer: s.removeRoomPlayer,
     setWsError:       s.setWsError,
+    setPlayerPowerUp: s.setPlayerPowerUp,
+    setCountdown:     s.setCountdown,
   }));
 
   // Keep a ref to the current leaderboard so the event handler closure is fresh
@@ -100,25 +108,21 @@ export function useWebSocket(): Socket | null {
 
     // ── room_joined ─────────────────────────────────────
     socket.on('room_joined', ({ roomId, hostId }: RoomJoinedPayload) => {
+      // Don't yank the user out of an in-progress game just because the socket
+      // reconnected and the server re-acknowledged the room join.
+      const currentScreen = useGameStore.getState().screen;
+      if (currentScreen === 'game') return;
       setRoom({ id: roomId, hostId, joinUrl: '', joinToken: '', playerCount: 1, status: 'waiting' });
       setScreen('lobby');
     });
-
+    // ── room_state ────────────────────────────────────────
+    // Server sends the complete player list to a newly joined client.
+    socket.on('room_state', ({ players }: { players: { userId: string; username: string; avatar: null; ready: boolean; highScore: number }[] }) => {
+      setRoomPlayers(players);
+    });
     // ── leaderboard_update ──────────────────────────────
     socket.on('leaderboard_update', (update: LeaderboardUpdate) => {
-      // Build a previousRank map from the current state
-      const prevRankMap = new Map<string, number>(
-        lbRef.current.map((e) => [e.userId, e.rank])
-      );
-
-      // Merge server entries with previousRank for client-side animations
-      const merged: LeaderboardEntry[] = update.entries.map((e) => ({
-        ...e,
-        isAlive:      e.isAlive ?? (e as any).alive ?? true,
-        previousRank: prevRankMap.get(e.userId) ?? null,
-      }));
-
-      setLeaderboard(merged);
+      setLeaderboard(LeaderboardSync.process(update, lbRef.current));
     });
 
     // ── final_ranking (per-player) ──────────────────────
@@ -139,7 +143,19 @@ export function useWebSocket(): Socket | null {
       setScore(0);
       setIsAlive(true);
       setFinalRanking(null);
+      setCountdown(null);
       setScreen('game');
+    });
+
+    // ── game_countdown (server-driven — shown on ALL clients) ───────
+    socket.on('game_countdown', ({ n }: { n: number }) => {
+      setCountdown(n);
+    });
+
+    // ── powerup_activated (other players' power-up broadcast) ───────
+
+    socket.on('powerup_activated', ({ userId, type }: PowerUpActivatedPayload) => {
+      setPlayerPowerUp(userId, type);
     });
 
     socket.on('room_closed', (_: RoomClosedPayload) => {
@@ -156,9 +172,13 @@ export function useWebSocket(): Socket | null {
       if (current) setRoom({ ...current, hostId: newHostId });
     });
 
-    socket.on('error', ({ message }: ErrorPayload) => {
-      console.error('[WS] server error:', message);
-      setWsError(message);
+    socket.on('error', ({ message, code }: ErrorPayload) => {
+      console.error('[WS] server error:', code, message);
+      // ALREADY_STARTED / NOT_HOST are non-fatal races — the UI already guards
+      // against them; surfacing them as a full-screen error is too disruptive.
+      // GAME_ACTIVE fires when a reconnect races the active-room guard — also silent.
+      const silent = code === 'ALREADY_STARTED' || code === 'NOT_HOST' || code === 'GAME_ACTIVE';
+      if (!silent) setWsError(message);
     });
 
     socket.on('disconnect', (reason: string) => {

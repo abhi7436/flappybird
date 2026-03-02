@@ -24,7 +24,7 @@ export const JoinRoomModal: React.FC<Props> = ({ open, onClose, onJoined }) => {
 
   const handleJoin = async (e: React.FormEvent) => {
     e.preventDefault();
-    const id = roomId.trim().toUpperCase();
+    const id = roomId.trim();
     if (!id) return;
     setError('');
     setLoading(true);

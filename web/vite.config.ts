@@ -12,6 +12,7 @@ export default defineConfig({
   },
   server: {
     port: 3000,
+    host: true,   // bind 0.0.0.0 so mobile/tablet devices on the same network can connect
     proxy: {
       '/api': 'http://localhost:3001',
       '/socket.io': {
