@@ -281,10 +281,10 @@ export const FinalRankingOverlay: React.FC<Props> = ({ onDismiss }) => {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.48 }}
                 whileTap={{ scale: 0.97 }}
-                onClick={onDismiss}
+                onPointerDown={(e) => { e.preventDefault(); onDismiss(); }}
                 className="btn-arcade py-3 text-base"
               >
-                {finalRanking.rank === 1 ? '🏆 Claim Victory!' : '🔄 Play Again?'}
+                🔄 Play Again
               </motion.button>
             </motion.div>
           </motion.div>

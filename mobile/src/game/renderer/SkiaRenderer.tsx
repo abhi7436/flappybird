@@ -17,6 +17,8 @@ import {
 import type { BirdState } from '@engine/Bird';
 import type { PipeState } from '@engine/Pipe';
 import type { PowerUpState } from '@engine/PowerUp';
+import type { CoinState } from '@engine/Coin';
+import type { BugState } from '@engine/Bug';
 
 // ── Skin definitions (mirrors server skins) ─────────────────────
 export interface SkinColors {
@@ -175,6 +177,62 @@ export function PowerUpSprite({ powerUp }: PowerUpSpriteProps) {
       <Circle cx={cx} cy={cy} r={r} color={palette.bg} />
       {/* Inner ring */}
       <Circle cx={cx} cy={cy} r={r - 3} color="rgba(255,255,255,0.3)" />
+    </Group>
+  );
+}
+
+// ── Coin collectible ─────────────────────────────────────────
+interface CoinSpriteProps {
+  coin: CoinState;
+}
+export function CoinSprite({ coin }: CoinSpriteProps) {
+  if (coin.collected) return null;
+  const cx = coin.x + coin.width  / 2;
+  const cy = coin.y + coin.height / 2;
+  const r  = coin.width / 2;
+  const isGolden = coin.type === 'golden';
+
+  return (
+    <Group>
+      {/* Glow for golden coins */}
+      {isGolden && (
+        <Circle cx={cx} cy={cy} r={r * 1.5} color="rgba(255, 230, 60, 0.3)" />
+      )}
+      {/* Coin body */}
+      <Circle cx={cx} cy={cy} r={r} color={isGolden ? '#f5b800' : '#ffc864'} />
+      {/* Highlight */}
+      <Circle cx={cx - r * 0.25} cy={cy - r * 0.25} r={r * 0.3} color="rgba(255,255,255,0.45)" />
+      {/* Rim */}
+      <Circle cx={cx} cy={cy} r={r - 1} color={isGolden ? '#b87800' : '#b85e00'}
+        style="stroke" strokeWidth={1.5} />
+    </Group>
+  );
+}
+
+// ── Bug collectible ──────────────────────────────────────────
+interface BugSpriteProps {
+  bug: BugState;
+}
+export function BugSprite({ bug }: BugSpriteProps) {
+  if (bug.collected) return null;
+  const cx = bug.x + bug.width  / 2;
+  const cy = bug.y + bug.height / 2;
+
+  return (
+    <Group>
+      {/* Body */}
+      <RoundedRect
+        x={cx - bug.width * 0.3}
+        y={cy - bug.height * 0.45}
+        width={bug.width * 0.6}
+        height={bug.height * 0.9}
+        r={bug.width * 0.15}
+        color="#2d8a1e"
+      />
+      {/* Head */}
+      <Circle cx={cx + bug.width * 0.2} cy={cy} r={bug.height * 0.27} color="#3cad28" />
+      {/* Eye */}
+      <Circle cx={cx + bug.width * 0.27} cy={cy - 2} r={1.5} color="#ff4a4a" />
     </Group>
   );
 }

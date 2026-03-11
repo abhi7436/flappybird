@@ -189,14 +189,43 @@ export interface PlayerAnalytics {
 }
 
 // ── WebSocket types ────────────────────────────────────────────
+
+/** Server-side room lifecycle states */
+export const ROOM_STATE = {
+  WAITING:  'waiting',
+  RUNNING:  'running',
+  FINISHED: 'finished',
+} as const;
+export type RoomStateValue = typeof ROOM_STATE[keyof typeof ROOM_STATE];
+
+/** Per-player lifecycle within a room */
+export const PLAYER_STATE = {
+  JOINED:  'joined',
+  READY:   'ready',
+  PLAYING: 'playing',
+  DEAD:    'dead',
+} as const;
+export type PlayerStateValue = typeof PLAYER_STATE[keyof typeof PLAYER_STATE];
+
+/** Optional timer configuration for timed game mode */
+export interface TimerConfig {
+  enabled:         boolean;
+  durationSeconds: number;
+  startTime:       number | null;
+}
+
 export interface PlayerState {
   id: string;        // socket.id
   userId: string;
   username: string;
   score: number;
+  /** Highest score achieved in the current round (survives timer-mode respawns) */
+  bestScore: number;
   alive: boolean;
   lastScoreAt: number;
   equippedSkin?: string;
+  /** Per-player lifecycle state */
+  playerState: PlayerStateValue;
 }
 
 export interface SpectatorState {
@@ -232,14 +261,23 @@ export interface LeaderboardUpdate {
 export type RoomStatus = 'waiting' | 'active' | 'closed';
 
 export interface RoomMeta {
-  roomId: string;
-  status: RoomStatus;
-  createdBy: string;
-  createdAt: number;
-  lastActivityAt: number;
-  playerCount: number;
-  spectatorCount: number;
+  roomId:           string;
+  status:           RoomStatus;
+  /** Current host userId — mutable via transfer_host */
+  createdBy:        string;
+  createdAt:        number;
+  lastActivityAt:   number;
+  playerCount:      number;
+  spectatorCount:   number;
   tournamentMatchId?: string;
+  /**
+   * When true the room stays alive until the host explicitly calls close_session,
+   * ignoring inactivity timeouts and all-dead auto-close.
+   * Defaults true on creation; set false only by close_session.
+   */
+  sessionActive:    boolean;
+  /** Optional timer mode configuration */
+  timerConfig?:     TimerConfig;
 }
 
 export interface CreateRoomResult {

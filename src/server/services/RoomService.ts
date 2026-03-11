@@ -64,6 +64,7 @@ export class RoomService {
       createdAt:      String(now),
       lastActivityAt: String(now),
       playerCount:    '0',
+      sessionActive:  'true',   // persistent until host calls close_session
     };
 
     await redisClient.hSet(metaKey(roomId), meta);
@@ -95,6 +96,16 @@ export class RoomService {
       playerCount:      Number(raw.playerCount),
       spectatorCount:   Number(raw.spectatorCount ?? 0),
       tournamentMatchId: raw.tournamentMatchId ?? undefined,
+      // Default to true for rooms created before this field existed
+      sessionActive:    raw.sessionActive !== 'false',
+      // Timer config (optional)
+      timerConfig: raw.timerEnabled === 'true'
+        ? {
+            enabled:         true,
+            durationSeconds: Number(raw.timerDuration ?? 60),
+            startTime:       raw.timerStartTime ? Number(raw.timerStartTime) : null,
+          }
+        : undefined,
     };
   }
 
@@ -123,12 +134,47 @@ export class RoomService {
     await redisClient.hSet(key, 'createdBy', newHostUserId);
   }
 
+  /**
+   * Flip the sessionActive flag.
+   * Set false before calling closeRoom so the inactivity watcher also stops
+   * keeping the room alive.
+   */
+  static async setSessionActive(roomId: string, active: boolean): Promise<void> {
+    const key = metaKey(roomId);
+    const exists = await redisClient.exists(key);
+    if (!exists) return;
+    await redisClient.hSet(key, 'sessionActive', active ? 'true' : 'false');
+  }
+
   /** Refresh the inactivity clock. Call on any player action. */
   static async touchActivity(roomId: string): Promise<void> {
     const key = metaKey(roomId);
     const exists = await redisClient.exists(key);
     if (!exists) return;
     await redisClient.hSet(key, 'lastActivityAt', String(Date.now()));
+  }
+
+  /** Store the timer start time in Redis meta (for timer mode). */
+  static async setTimerStartTime(roomId: string, startTime: number): Promise<void> {
+    const key = metaKey(roomId);
+    const exists = await redisClient.exists(key);
+    if (!exists) return;
+    await redisClient.hSet(key, 'timerStartTime', String(startTime));
+  }
+
+  /** Store timer config on room meta when host starts a timed game. */
+  static async setTimerConfig(
+    roomId: string,
+    enabled: boolean,
+    durationSeconds: number
+  ): Promise<void> {
+    const key = metaKey(roomId);
+    const exists = await redisClient.exists(key);
+    if (!exists) return;
+    await redisClient.hSet(key, {
+      timerEnabled:  enabled ? 'true' : 'false',
+      timerDuration: String(durationSeconds),
+    });
   }
 
   static async incrementPlayerCount(roomId: string, delta: 1 | -1): Promise<void> {
@@ -181,6 +227,9 @@ export class RoomService {
           const raw = await redisClient.hGetAll(key);
           if (!raw.status || raw.status === 'closed') continue;
 
+          // Persistent sessions are managed by the host, not the timer.
+          if (raw.sessionActive !== 'false') continue;
+
           const idleMs = Date.now() - Number(raw.lastActivityAt);
           if (idleMs >= INACTIVITY_TIMEOUT_MS) {
             const roomId = key.replace('room:', '').replace(':meta', '');
@@ -195,19 +244,49 @@ export class RoomService {
   }
 
   /**
-   * Check if all players in a room are dead and close with grace period.
-   * Call this after every game_over event.
+   * Check if all players in a room are dead.
+   *
+   * • Persistent session (sessionActive = true): emit 'round_ended', then
+   *   reset status to 'waiting' after the grace period so players can
+   *   start a new round without rejoining.
+   *
+   * • Non-persistent session: close the room with a grace period (legacy
+   *   behaviour — shows final leaderboard before disconnecting everyone).
    */
   static async maybeCloseAllDead(
     roomId: string,
     io: Server,
     playerCount: number,
-    deadCount: number
+    deadCount: number,
+    /** Optional hook: called just before status resets to 'waiting' on a
+     *  persistent-session round end (use it to reset in-memory player state). */
+    onRoundReset?: () => void
   ): Promise<void> {
-    if (playerCount > 0 && deadCount >= playerCount) {
-      console.log(`[RoomService] All players dead in ${roomId} — closing in ${CLOSE_GRACE_MS / 1000}s`);
-      await RoomService.setStatus(roomId, 'closed'); // block new joins immediately
-      await RoomService.closeRoom(roomId, 'all_dead', io, CLOSE_GRACE_MS);
+    if (playerCount <= 0 || deadCount < playerCount) return;
+
+    const meta = await RoomService.getMeta(roomId);
+    if (!meta) return;
+
+    if (meta.sessionActive) {
+      // Persistent session: reset for next round instead of closing.
+      console.log(`[RoomService] All players dead in ${roomId} — session active, resetting immediately`);
+      io.to(roomId).emit('round_ended', { roomId, reason: 'all_dead' });
+      // Immediately reset room to 'waiting' so host can start a new round
+      // as soon as they dismiss the FinalRanking overlay.
+      onRoundReset?.();
+      await RoomService.setStatus(roomId, 'waiting');
+      // Emit round_reset after a short delay — gives FinalRanking time to display
+      // before auto-navigating remaining clients back to lobby.
+      setTimeout(() => {
+        io.to(roomId).emit('round_reset', { roomId });
+        console.log(`[RoomService] Room ${roomId} reset to waiting for next round`);
+      }, 8_000);
+      return;
     }
+
+    // Non-persistent: close with grace period (legacy behaviour).
+    console.log(`[RoomService] All players dead in ${roomId} — closing in ${CLOSE_GRACE_MS / 1000}s`);
+    await RoomService.setStatus(roomId, 'closed'); // block new joins immediately
+    await RoomService.closeRoom(roomId, 'all_dead', io, CLOSE_GRACE_MS);
   }
 }

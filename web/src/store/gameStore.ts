@@ -78,6 +78,17 @@ interface GameStore {
   wsError: string | null;
   setWsError: (msg: string | null) => void;
 
+  // ── Timer mode ──────────────────────────────────────────
+  /** Seconds remaining in timer mode, null when not in timer mode */
+  timerRemaining: number | null;
+  setTimerRemaining: (n: number | null) => void;
+  /** Total duration of the timer in seconds */
+  timerTotal: number | null;
+  setTimerTotal: (n: number | null) => void;
+  /** Whether the current game is in timer mode */
+  isTimerMode: boolean;
+  setIsTimerMode: (v: boolean) => void;
+
   // ── Game state reset ────────────────────────────────────────
   /** Clears all in-game state when leaving a game */
   resetGameState: () => void;}
@@ -144,6 +155,13 @@ export const useGameStore = create<GameStore>((set) => ({
   wsError: null,
   setWsError: (wsError) => set({ wsError }),
 
+  timerRemaining: null,
+  setTimerRemaining: (timerRemaining) => set({ timerRemaining }),
+  timerTotal: null,
+  setTimerTotal: (timerTotal) => set({ timerTotal }),
+  isTimerMode: false,
+  setIsTimerMode: (isTimerMode) => set({ isTimerMode }),
+
   playerPowerUps: {},
   setPlayerPowerUp: (userId, type) =>
     set((s) => ({
@@ -166,5 +184,8 @@ export const useGameStore = create<GameStore>((set) => ({
     roomPlayers:    [],
     countdown:      null,
     playerPowerUps: {},
+    timerRemaining: null,
+    timerTotal:     null,
+    isTimerMode:    false,
   }),
 }));

@@ -37,6 +37,9 @@ export function useWebSocket(): Socket | null {
     setWsError,
     setPlayerPowerUp,
     setCountdown,
+    setTimerRemaining,
+    setTimerTotal,
+    setIsTimerMode,
   } = useGameStore((s) => ({
     user:             s.user,
     leaderboard:      s.leaderboard,
@@ -54,6 +57,9 @@ export function useWebSocket(): Socket | null {
     setWsError:       s.setWsError,
     setPlayerPowerUp: s.setPlayerPowerUp,
     setCountdown:     s.setCountdown,
+    setTimerRemaining: s.setTimerRemaining,
+    setTimerTotal:    s.setTimerTotal,
+    setIsTimerMode:   s.setIsTimerMode,
   }));
 
   // Keep a ref to the current leaderboard so the event handler closure is fresh
@@ -138,12 +144,22 @@ export function useWebSocket(): Socket | null {
       removeRoomPlayer(userId);
     });
 
-    socket.on('game_started', ({ startedAt: _t }: { startedAt: number }) => {
+    socket.on('game_started', ({ startedAt: _t, timerConfig }: { startedAt: number; timerConfig?: { enabled: boolean; durationSeconds: number } | null }) => {
       // Reset per-game state so the canvas boots fresh for every round
       setScore(0);
       setIsAlive(true);
       setFinalRanking(null);
       setCountdown(null);
+      // Set up timer mode if configured
+      if (timerConfig?.enabled && timerConfig.durationSeconds > 0) {
+        setIsTimerMode(true);
+        setTimerTotal(timerConfig.durationSeconds);
+        setTimerRemaining(timerConfig.durationSeconds);
+      } else {
+        setIsTimerMode(false);
+        setTimerTotal(null);
+        setTimerRemaining(null);
+      }
       setScreen('game');
     });
 
@@ -156,6 +172,54 @@ export function useWebSocket(): Socket | null {
 
     socket.on('powerup_activated', ({ userId, type }: PowerUpActivatedPayload) => {
       setPlayerPowerUp(userId, type);
+    });
+
+    // ── timer_tick (timer mode countdown from server) ──────────────
+    socket.on('timer_tick', ({ remaining, total }: { remaining: number; total: number }) => {
+      setTimerRemaining(remaining);
+      setTimerTotal(total);
+    });
+
+    // ── game_finished (timer expired — game over for all) ──────────
+    socket.on('game_finished', ({ leaderboard: finalLb, winner }: {
+      roomId: string;
+      reason: string;
+      winner: { userId: string; username: string; score: number } | null;
+      leaderboard: LeaderboardEntry[];
+    }) => {
+      // Update leaderboard with final data
+      if (finalLb) setLeaderboard(finalLb);
+      // Show final ranking for the current user
+      const currentUser = useGameStore.getState().user;
+      const currentGuest = useGameStore.getState().guest;
+      const myId = currentUser?.id ?? currentGuest?.id;
+      const myEntry = finalLb?.find((e: LeaderboardEntry) => e.userId === myId);
+      if (myEntry) {
+        setFinalRanking({
+          rank: myEntry.rank,
+          totalPlayers: finalLb.length,
+          finalScore: myEntry.score,
+        });
+      } else {
+        // Fallback: show rank 0
+        setFinalRanking({
+          rank: 0,
+          totalPlayers: finalLb?.length ?? 0,
+          finalScore: useGameStore.getState().score,
+        });
+      }
+      // Clear timer state
+      setTimerRemaining(null);
+      setTimerTotal(null);
+      setIsTimerMode(false);
+    });
+
+    // ── player_respawn (timer mode — death is temporary) ───────────
+    socket.on('player_respawn', () => {
+      // Reset alive so the GameCanvas death overlay hides
+      // and shows "Tap to Start" for the respawned player.
+      setIsAlive(true);
+      setScore(0);
     });
 
     socket.on('room_closed', (_: RoomClosedPayload) => {
@@ -172,12 +236,42 @@ export function useWebSocket(): Socket | null {
       if (current) setRoom({ ...current, hostId: newHostId });
     });
 
+    // Server emits host_updated (e.g. on transfer_host or disconnect reassignment)
+    socket.on('host_updated', ({ newHostId }: { newHostId: string }) => {
+      const current = useGameStore.getState().room;
+      if (current) setRoom({ ...current, hostId: newHostId });
+    });
+
+    // ── round_ended / round_reset (persistent session lifecycle) ─────
+    // Server emits round_ended when all players die, then round_reset
+    // after the grace period to return to lobby for the next round.
+    socket.on('round_ended', () => {
+      // No action needed — FinalRanking overlay handles per-player UI
+    });
+
+    socket.on('round_reset', () => {
+      // Server has reset the room to 'waiting' — send all players back to lobby
+      setScore(0);
+      setIsAlive(true);
+      setFinalRanking(null);
+      setCountdown(null);
+      useGameStore.getState().setLeaderboard([]);
+      setScreen('lobby');
+    });
+
+    // ── session_closed (host closed the persistent session) ──────────
+    socket.on('session_closed', () => {
+      resetGameState();
+      setScreen('menu');
+    });
+
     socket.on('error', ({ message, code }: ErrorPayload) => {
       console.error('[WS] server error:', code, message);
       // ALREADY_STARTED / NOT_HOST are non-fatal races — the UI already guards
       // against them; surfacing them as a full-screen error is too disruptive.
       // GAME_ACTIVE fires when a reconnect races the active-room guard — also silent.
-      const silent = code === 'ALREADY_STARTED' || code === 'NOT_HOST' || code === 'GAME_ACTIVE';
+      // ROOM_NOT_ACTIVE fires when player_restart races a round reset — harmless.
+      const silent = code === 'ALREADY_STARTED' || code === 'NOT_HOST' || code === 'GAME_ACTIVE' || code === 'ROOM_NOT_ACTIVE';
       if (!silent) setWsError(message);
     });
 

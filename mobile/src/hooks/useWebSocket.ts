@@ -21,6 +21,8 @@ export function useWebSocket() {
   const setEloChange       = useGameStore((s) => s.setEloChange);
   const addUnlockedSkins   = useGameStore((s) => s.addUnlockedSkins);
   const setSpectatingRoomId = useGameStore((s) => s.setSpectatingRoomId);
+  const setScore             = useGameStore((s) => s.setScore);
+  const setHostId            = useGameStore((s) => s.setHostId);
 
   // Previous leaderboard for rank delta tracking (client-side)
   const prevLeaderboardRef = useRef<LeaderboardUpdate['entries']>([]);
@@ -51,6 +53,10 @@ export function useWebSocket() {
     });
 
     // ── Lobby events ──────────────────────────────────────
+    socket.on('room_joined', ({ hostId }: { roomId: string; hostId: string }) => {
+      setHostId(hostId);
+    });
+
     socket.on('player_joined', (data: { playerId: string; username: string }) => {
       addLobbyPlayer(data);
     });
@@ -60,6 +66,9 @@ export function useWebSocket() {
     });
 
     socket.on('game_started', () => {
+      // Reset per-game state so the engine boots fresh for every round
+      setScore(0);
+      setFinalRanking(null);
       setGameStarted(true);
     });
 
@@ -120,6 +129,39 @@ export function useWebSocket() {
       setSpectatingRoomId(null);
     });
 
+    // ── Round lifecycle (session rooms) ─────────────────────
+    socket.on('round_ended', () => {
+      console.log('[WS] round_ended');
+    });
+
+    socket.on('round_reset', () => {
+      console.log('[WS] round_reset — ready for next round');
+      setScore(0);
+      setFinalRanking(null);
+      setGameStarted(false);
+      setLeaderboard([]);
+    });
+
+    // ── Host transfer ─────────────────────────────────────────
+    socket.on('host_updated', ({ newHostId }: { newHostId: string }) => {
+      console.log('[WS] host_updated:', newHostId);
+      setHostId(newHostId);
+    });
+
+    socket.on('host_changed', ({ newHostId }: { newHostId: string }) => {
+      console.log('[WS] host_changed:', newHostId);
+      setHostId(newHostId);
+    });
+
+    // ── Error handler ──────────────────────────────────────
+    socket.on('error', ({ message, code }: { message: string; code?: string }) => {
+      console.error('[WS] server error:', code, message);
+      // ROOM_NOT_ACTIVE fires when player_restart races a round reset — harmless.
+      const silent = code === 'ALREADY_STARTED' || code === 'NOT_HOST'
+        || code === 'GAME_ACTIVE' || code === 'ROOM_NOT_ACTIVE';
+      if (!silent) console.warn('[WS] non-silent error:', message);
+    });
+
     return () => {
       socket.disconnect();
       socketRef.current = null;
@@ -166,6 +208,10 @@ export function useWebSocket() {
     socketRef.current?.emit('power_up_collected', { roomId, type });
   }, []);
 
+  const playerRestart = useCallback((roomId: string) => {
+    socketRef.current?.emit('player_restart', { roomId });
+  }, []);
+
   return {
     socket: socketRef,
     joinRoom,
@@ -176,5 +222,6 @@ export function useWebSocket() {
     spectateRoom,
     leaveSpectate,
     reportPowerUpCollected,
+    playerRestart,
   };
 }

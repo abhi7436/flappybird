@@ -12,7 +12,7 @@ import { UserRepository } from './repositories/UserRepository';
 import { ReplayRepository } from './repositories/ReplayRepository';
 import { SkinRepository } from './repositories/SkinRepository';
 import { verifyToken } from './middleware/authMiddleware';
-import { LeaderboardEntry, LeaderboardUpdate, PlayerState } from './types';
+import { LeaderboardEntry, LeaderboardUpdate, PlayerState, PLAYER_STATE } from './types';
 import { config, allowedOrigins } from './config/env';
 import type { ReplayData } from '../game-engine/ReplayRecorder';
 
@@ -158,9 +158,10 @@ export async function initializeWebSocketServer(
           return;
         }
         // Block late joiners from entering an already-active game.
-        // Exception: if this userId is already registered (reconnect), let them through.
+        // Exception 1: reconnect — userId already registered in memory.
+        // Exception 2: sessionActive room — late joiners observe until next round.
         const isReconnect = !!roomManager.findSocketIdForUser(roomId, user.userId);
-        if (roomMeta0.status === 'active' && !isReconnect) {
+        if (roomMeta0.status === 'active' && !isReconnect && !roomMeta0.sessionActive) {
           socket.emit('error', { message: 'Game is already in progress', code: 'GAME_ACTIVE' });
           return;
         }
@@ -211,8 +212,10 @@ export async function initializeWebSocketServer(
           userId: user.userId,
           username: user.username,
           score: 0,
+          bestScore: 0,
           alive: true,
           lastScoreAt: Date.now(),
+          playerState: PLAYER_STATE.JOINED,
         };
 
         roomManager.addPlayer(roomId, player);
@@ -229,10 +232,12 @@ export async function initializeWebSocketServer(
         await RoomService.touchActivity(roomId);
 
         const roomMeta = await RoomService.getMeta(roomId);
+        const isObserver = roomMeta?.status === 'active' && !isReconnect;
         socket.emit('room_joined', {
           roomId,
           playerId: socket.id,
           hostId:   roomMeta?.createdBy ?? user.userId,
+          isObserver,         // true when joining a running game mid-round
         });
 
         // Send the full current player list to the joining socket so its lobby is populated
@@ -247,6 +252,14 @@ export async function initializeWebSocketServer(
             }))
           : [];
         socket.emit('room_state', { players: roomStatePlayers });
+
+        // If the host already configured timer mode, let the new joiner know
+        if (roomMeta?.timerConfig?.enabled) {
+          socket.emit('timer_config_updated', {
+            enabled: true,
+            durationSeconds: roomMeta.timerConfig.durationSeconds,
+          });
+        }
 
         io.to(roomId).emit('player_joined', {
           playerId: socket.id,
@@ -370,13 +383,48 @@ export async function initializeWebSocketServer(
           rank,
         });
 
+        // ── Timer-mode respawn ───────────────────────────────
+        // In timer mode, death is temporary — the player is offered a
+        // respawn (score resets to 0) as long as the timer hasn't expired.
+        const roomMeta = await RoomService.getMeta(roomId);
+        const isTimerMode = !!roomMeta?.timerConfig?.enabled;
+
+        if (isTimerMode) {
+          // Auto-respawn: reset the player so the client can "Tap to Start" again
+          const respawned = roomManager.resetPlayerForRestart(roomId, socket.id);
+          if (respawned) {
+            await roomManager.syncToRedis(roomId, respawned);
+            socket.emit('player_respawn', {
+              playerId: socket.id,
+              userId:   user.userId,
+              reason:   'timer_mode',
+            });
+          }
+          scheduleBroadcast(io, roomId);
+          return; // skip all-dead check — timer controls game end
+        }
+
+        // ── Standard mode: all-dead detection ────────────────
         const { total, dead } = roomManager.getDeadStats(roomId);
         const allDead = total > 0 && dead >= total;
-        scheduleBroadcast(io, roomId, allDead);
 
         if (allDead) {
-          // Process ELO for full room
+          // Snapshot the final leaderboard BEFORE any reset clears scores.
           const finalBoard = await roomManager.getLeaderboard(roomId);
+
+          // Broadcast the final leaderboard synchronously so it arrives
+          // with real scores (before onRoundReset zeros them out).
+          const prev = leaderboardSnapshots.get(roomId) ?? [];
+          const movements = LeaderboardService.computeMovements(prev, finalBoard);
+          leaderboardSnapshots.set(roomId, finalBoard);
+          io.to(roomId).emit('leaderboard_update', {
+            roomId,
+            entries:   finalBoard,
+            movements,
+            isFinal:   true,
+          } as LeaderboardUpdate);
+
+          // Process ELO for full room
           const eloResults = await EloService.processGameResults(
             finalBoard.map((e) => ({
               userId: e.userId,
@@ -394,14 +442,26 @@ export async function initializeWebSocketServer(
               io.to(roomId).emit('skins_unlocked', { userId: r.userId, skinIds: unlocked });
             }
           }
+        } else {
+          // Not all dead yet — normal throttled broadcast
+          scheduleBroadcast(io, roomId);
         }
 
-        await RoomService.maybeCloseAllDead(roomId, io, total, dead);
+        await RoomService.maybeCloseAllDead(roomId, io, total, dead, () => {
+          // Called when a persistent session round resets to 'waiting'.
+          // Delay score reset so the synchronous final broadcast above
+          // has already been dispatched with the real scores.
+          setTimeout(() => {
+            roomManager.resetPlayersForNextRound(roomId).catch((err) =>
+              console.error(`[WS] resetPlayersForNextRound error:`, err)
+            );
+          }, 500);
+        });
       }
     );
 
     // ── start_game ───────────────────────────────────────
-    socket.on('start_game', async ({ roomId }: { roomId: string }) => {
+    socket.on('start_game', async ({ roomId, timerConfig: clientTimerCfg }: { roomId: string; timerConfig?: { enabled: boolean; durationSeconds: number } }) => {
       // Authoritative host check: compare against the createdBy field stored in Redis
       const meta = await RoomService.getMeta(roomId);
       if (!meta) {
@@ -441,8 +501,35 @@ export async function initializeWebSocketServer(
         io.to(roomId).emit('game_countdown', { n });
         if (n === 0) {
           countingDownRooms.delete(roomId);
+
+          // Transition all players to READY and emit game_initialized so clients
+          // can show "Tap to Start" before physics begin.
+          roomManager.setAllPlayersState(roomId, PLAYER_STATE.READY);
+
+          // ── Timer mode setup ──────────────────────────────────
+          // Prefer client-provided timer config, fall back to stored meta
+          let timerCfg = meta.timerConfig;
+          if (clientTimerCfg?.enabled) {
+            timerCfg = { enabled: true, durationSeconds: clientTimerCfg.durationSeconds };
+            // Persist to Redis so other server reads see it
+            RoomService.setTimerConfig(roomId, true, clientTimerCfg.durationSeconds).catch(() => {});
+          }
+          const startedAt = Date.now();
+
           RoomService.setStatus(roomId, 'active')
-            .then(() => io.to(roomId).emit('game_started', { startedAt: Date.now() }))
+            .then(() => {
+              io.to(roomId).emit('game_initialized', { roomId });
+              io.to(roomId).emit('game_started', {
+                startedAt,
+                timerConfig: timerCfg ?? null,
+              });
+
+              // If timer mode, start a server interval to tick down
+              if (timerCfg?.enabled && timerCfg.durationSeconds > 0) {
+                RoomService.setTimerStartTime(roomId, startedAt).catch(() => {});
+                startTimerInterval(io, roomId, startedAt, timerCfg.durationSeconds);
+              }
+            })
             .catch((err) => console.error('[WS] Failed to activate room:', err));
           return;
         }
@@ -450,6 +537,112 @@ export async function initializeWebSocketServer(
         setTimeout(tick, 1000);
       };
       tick(); // emit n=3 immediately, then 2, 1, 0+start
+    });
+
+    // ── set_timer_config ─────────────────────────────────
+    // Host broadcasts timer mode settings to all players in the lobby.
+    socket.on('set_timer_config', async ({ roomId, enabled, durationSeconds }: { roomId: string; enabled: boolean; durationSeconds: number }) => {
+      const meta = await RoomService.getMeta(roomId);
+      if (!meta) return;
+      if (meta.createdBy !== user.userId) return; // silent — only host
+      // Persist so late-joining players receive it via room_joined flow
+      await RoomService.setTimerConfig(roomId, enabled, durationSeconds);
+      // Broadcast to everyone in the room (including host for confirmation)
+      io.to(roomId).emit('timer_config_updated', { enabled, durationSeconds });
+    });
+
+    // ── transfer_host ─────────────────────────────────────
+    // Only the current host can transfer ownership to another player.
+    socket.on(
+      'transfer_host',
+      async ({ roomId, newHostUserId }: { roomId: string; newHostUserId: string }) => {
+        const meta = await RoomService.getMeta(roomId);
+        if (!meta) {
+          socket.emit('error', { message: 'Room not found', code: 'ROOM_NOT_FOUND' });
+          return;
+        }
+        if (meta.createdBy !== user.userId) {
+          socket.emit('error', { message: 'Only the current host can transfer', code: 'NOT_HOST' });
+          return;
+        }
+        if (newHostUserId === user.userId) {
+          socket.emit('error', { message: 'You are already the host', code: 'ALREADY_HOST' });
+          return;
+        }
+        // Verify target user is actually in the room
+        const targetSocket = roomManager.findSocketIdForUser(roomId, newHostUserId);
+        if (!targetSocket) {
+          socket.emit('error', { message: 'Target user not in room', code: 'USER_NOT_FOUND' });
+          return;
+        }
+        await RoomService.setHost(roomId, newHostUserId);
+        io.to(roomId).emit('host_updated', { newHostId: newHostUserId });
+        console.log(`[WS] Host transferred in ${roomId}: ${user.userId} → ${newHostUserId}`);
+      }
+    );
+
+    // ── close_session ────────────────────────────────────
+    // Host explicitly ends the persistent session. Room is closed and all
+    // sockets disconnected after a brief notification.
+    socket.on('close_session', async ({ roomId }: { roomId: string }) => {
+      const meta = await RoomService.getMeta(roomId);
+      if (!meta) {
+        socket.emit('error', { message: 'Room not found', code: 'ROOM_NOT_FOUND' });
+        return;
+      }
+      if (meta.createdBy !== user.userId) {
+        socket.emit('error', { message: 'Only the host can close the session', code: 'NOT_HOST' });
+        return;
+      }
+      console.log(`[WS] Host ${user.username} closed session ${roomId}`);
+      clearTimerInterval(roomId);
+      await RoomService.setSessionActive(roomId, false);
+      io.to(roomId).emit('session_closed', { roomId, reason: 'host_closed' });
+      await RoomService.closeRoom(roomId, 'manual', io, 1_500); // brief delay for clients to show notice
+    });
+
+    // ── close_room ───────────────────────────────────────
+    // Alias for close_session — host permanently closes the room.
+    socket.on('close_room', async ({ roomId }: { roomId: string }) => {
+      const meta = await RoomService.getMeta(roomId);
+      if (!meta) {
+        socket.emit('error', { message: 'Room not found', code: 'ROOM_NOT_FOUND' });
+        return;
+      }
+      if (meta.createdBy !== user.userId) {
+        socket.emit('error', { message: 'Only the host can close the room', code: 'NOT_HOST' });
+        return;
+      }
+      console.log(`[WS] Host ${user.username} closed room ${roomId}`);
+      clearTimerInterval(roomId);
+      await RoomService.setSessionActive(roomId, false);
+      io.to(roomId).emit('room_closed', { roomId, reason: 'host_closed' });
+      await RoomService.closeRoom(roomId, 'manual', io, 1_500);
+    });
+
+    // ── player_restart ───────────────────────────────────
+    // A player who died re-enters the game (timer-mode respawn or
+    // play-again in any mode as long as the room is still active).
+    socket.on('player_restart', async ({ roomId }: { roomId: string }) => {
+      const meta = await RoomService.getMeta(roomId);
+      if (!meta || meta.status !== 'active') {
+        socket.emit('error', { message: 'Room is not active', code: 'ROOM_NOT_ACTIVE' });
+        return;
+      }
+
+      const player = roomManager.resetPlayerForRestart(roomId, socket.id);
+      if (!player) {
+        socket.emit('error', { message: 'Player not in room', code: 'NOT_IN_ROOM' });
+        return;
+      }
+
+      await roomManager.syncToRedis(roomId, player);
+      socket.emit('player_respawn', { playerId: socket.id, userId: user.userId });
+      io.to(roomId).emit('player_restarted', {
+        userId:   user.userId,
+        username: user.username,
+      });
+      scheduleBroadcast(io, roomId);
     });
 
     // ── spectate_room ────────────────────────────────────
@@ -514,6 +707,18 @@ export async function initializeWebSocketServer(
           // Only clean up the socket → room mapping.
           socketRoomMap.delete(socket.id);
           socket.leave(info.roomId);
+
+          // ── Host reassignment during active game ──────────────────
+          // If the disconnecting player was the host, transfer to the
+          // oldest remaining connected player immediately.
+          if (meta.createdBy === info.userId) {
+            const nextPlayer = roomManager.getFirstPlayer(info.roomId);
+            if (nextPlayer && nextPlayer.userId !== info.userId) {
+              await RoomService.setHost(info.roomId, nextPlayer.userId);
+              io.to(info.roomId).emit('host_updated', { newHostId: nextPlayer.userId });
+              console.log(`[WS] Mid-game host reassigned in ${info.roomId}: ${info.userId} → ${nextPlayer.userId}`);
+            }
+          }
         } else {
           await handleLeave(socket, io, info.roomId, info.userId);
         }
@@ -531,13 +736,106 @@ export async function initializeWebSocketServer(
   return { io };
 }
 
+// ── Timer-mode interval tracking ──────────────────────────────
+const activeTimers = new Map<string, NodeJS.Timeout>();
+
+/**
+ * Start a 1-second interval that ticks remaining time and ends the game
+ * when the timer expires. Winner = player with highest score.
+ */
+function startTimerInterval(
+  io: Server,
+  roomId: string,
+  startedAt: number,
+  durationSeconds: number
+): void {
+  // Clear previous timer if any (safety)
+  clearTimerInterval(roomId);
+
+  const endTime = startedAt + durationSeconds * 1000;
+
+  const interval = setInterval(async () => {
+    const remaining = Math.max(0, Math.ceil((endTime - Date.now()) / 1000));
+
+    io.to(roomId).emit('timer_tick', { remaining, total: durationSeconds });
+
+    if (remaining <= 0) {
+      clearTimerInterval(roomId);
+
+      // Determine winner → highest score
+      const leaderboard = await roomManager.getLeaderboard(roomId);
+      const winner = leaderboard.length > 0 ? leaderboard[0] : null;
+
+      io.to(roomId).emit('game_finished', {
+        roomId,
+        reason: 'timer_expired',
+        winner: winner
+          ? { userId: winner.userId, username: winner.username, score: winner.score }
+          : null,
+        leaderboard,
+      });
+
+      // Process ELO for full room
+      if (leaderboard.length > 0) {
+        const eloResults = await EloService.processGameResults(
+          leaderboard.map((e) => ({
+            userId: e.userId,
+            score:  e.score,
+            rank:   e.rank,
+            total:  leaderboard.length,
+          }))
+        );
+        for (const r of eloResults) {
+          io.to(roomId).emit('elo_update', r);
+          const unlocked = await SkinRepository.checkEloUnlocks(r.userId, r.newElo);
+          if (unlocked.length > 0) {
+            io.to(roomId).emit('skins_unlocked', { userId: r.userId, skinIds: unlocked });
+          }
+        }
+      }
+
+      // Transition room based on session type
+      const meta = await RoomService.getMeta(roomId);
+      if (meta?.sessionActive) {
+        io.to(roomId).emit('round_ended', { roomId, reason: 'timer_expired' });
+        // Immediately reset room to 'waiting' so the host can start a new round
+        // once they dismiss the final ranking overlay.
+        await roomManager.resetPlayersForNextRound(roomId);
+        await RoomService.setStatus(roomId, 'waiting');
+        // Emit round_reset after a short delay to allow the FinalRanking
+        // overlay to show before auto-navigating back to lobby.
+        setTimeout(() => {
+          io.to(roomId).emit('round_reset', { roomId });
+        }, 8_000);
+      } else {
+        await RoomService.setStatus(roomId, 'closed');
+        await RoomService.closeRoom(roomId, 'all_dead', io, 30_000);
+      }
+    }
+  }, 1000);
+
+  activeTimers.set(roomId, interval);
+}
+
+function clearTimerInterval(roomId: string): void {
+  const timer = activeTimers.get(roomId);
+  if (timer) {
+    clearInterval(timer);
+    activeTimers.delete(roomId);
+  }
+}
+
 async function handleLeave(
   socket: Socket,
   io: Server,
   roomId: string,
   userId: string
 ): Promise<void> {
-  roomManager.removePlayer(roomId, socket.id);
+  // Check sessionActive BEFORE removing — determines keepAlive behaviour
+  const meta = await RoomService.getMeta(roomId);
+  const keepAlive = !!meta?.sessionActive;
+
+  roomManager.removePlayer(roomId, socket.id, keepAlive);
   await LeaderboardService.removePlayer(roomId, userId);
   socket.leave(roomId);
   socketRoomMap.delete(socket.id);
@@ -545,26 +843,30 @@ async function handleLeave(
   io.to(roomId).emit('player_left', { playerId: socket.id, userId });
   scheduleBroadcast(io, roomId);
 
-  // ── Host reassignment (lobby phase only) ─────────────────────
-  // If the departing player was the host and the room is still in 'waiting'
-  // status, promote the next connected player to host so the lobby stays
-  // functional. If the room is now empty, close it immediately.
-  const meta = await RoomService.getMeta(roomId);
-  if (meta && meta.status === 'waiting' && meta.createdBy === userId) {
+  // ── Host reassignment (any phase) ──────────────────────────
+  // If the departing player was the host, promote the next connected player.
+  if (meta && meta.createdBy === userId) {
     const nextPlayer = roomManager.getFirstPlayer(roomId);
     if (nextPlayer) {
-      // Persist new host in Redis so the authoritative check in start_game passes
       await RoomService.setHost(roomId, nextPlayer.userId);
-      io.to(roomId).emit('host_changed', { newHostId: nextPlayer.userId });
+      io.to(roomId).emit('host_updated', { newHostId: nextPlayer.userId });
       console.log(`[WS] Host reassigned in room ${roomId}: ${userId} → ${nextPlayer.userId}`);
-    } else {
-      // No one left — close immediately so we don’t leave a ghost room
+    } else if (!keepAlive) {
+      // No one left and session is NOT persistent — close immediately
       await RoomService.closeRoom(roomId, 'manual', io);
       return;
     }
+    // If keepAlive is true and room is empty, room stays alive for rejoin.
   }
 
-  // If all remaining players are dead, close the room
+  // If all remaining players are dead, handle round end / close
   const { total, dead } = roomManager.getDeadStats(roomId);
-  await RoomService.maybeCloseAllDead(roomId, io, total, dead);
+  await RoomService.maybeCloseAllDead(roomId, io, total, dead, () => {
+    // Called when a persistent session round resets to 'waiting'
+    setTimeout(() => {
+      roomManager.resetPlayersForNextRound(roomId).catch((err) =>
+        console.error(`[WS] resetPlayersForNextRound error:`, err)
+      );
+    }, 500);
+  });
 }

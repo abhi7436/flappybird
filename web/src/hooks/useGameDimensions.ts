@@ -47,13 +47,18 @@ function compute(mode: 'solo' | 'game'): Dims {
   const vw = window.visualViewport?.width  ?? window.innerWidth;
   const vh = window.visualViewport?.height ?? window.innerHeight;
 
+  // On narrow screens (mobile), treat 'game' mode like 'solo' — the sidebar
+  // will be overlaid instead of side-by-side.
+  const isMobile  = vw < 768;
+  const effective = isMobile ? 'solo' : mode;
+
   // Horizontal: container p-2 (8px each side = 16px) + optional sidebar
   const hPad     = 16;                          // 8 px each side
-  const sidebarW = mode === 'game' ? 272 : 0;   // leaderboard w-64 (256px) + gap-4 (16px)
+  const sidebarW = effective === 'game' ? 272 : 0;   // leaderboard w-64 (256px) + gap-4 (16px)
   const availW   = vw - hPad - sidebarW;
 
   // Vertical: p-2 (16px) + top-bar / HUD (~44px) + gap-4 (16px) = ~76px
-  const vPad   = mode === 'game' ? 96 : 80;     // game mode has HUD above canvas
+  const vPad   = effective === 'game' ? 96 : 56;  // solo/mobile: minimal chrome
   const availH = vh - vPad;
 
   // Try width-first
@@ -66,9 +71,11 @@ function compute(mode: 'solo' | 'game'): Dims {
     w = Math.round(h * ASPECT_W / ASPECT_H);      // w = h * 0.667
   }
 
-  // Clamp to min / max
-  w = clamp(w, 280, 500);
-  h = clamp(h, 420, 750);
+  // Clamp to min / max — mobile can go larger
+  const maxW = isMobile ? 600 : 500;
+  const maxH = isMobile ? 900 : 750;
+  w = clamp(w, 280, maxW);
+  h = clamp(h, 420, maxH);
 
   // Re-enforce aspect ratio after clamping (prefer respecting width clamp)
   h = Math.round(w * ASPECT_H / ASPECT_W);

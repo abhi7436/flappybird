@@ -6,6 +6,7 @@ import {
   GameEngineCallbacks,
   GameStatus,
   ActiveEffect,
+  GAME_STATE,
 } from '@engine/GameEngine';
 import { CoinState, CoinType } from '@engine/Coin';
 import { BugState } from '@engine/Bug';
@@ -16,6 +17,9 @@ import { useGameStore } from '../store/gameStore';
 import { useSound } from './useSound';
 import { useMultiplayerSync } from './useMultiplayerSync';
 import soundManager from '../services/SoundManager';
+
+/** Re-export for consumers (Canvas components, overlays, etc.) */
+export { GAME_STATE } from '@engine/GameEngine';
 
 export interface GameState {
   birdX:        number;
@@ -195,7 +199,7 @@ export function useGameEngine(
     const engine = new GameEngine(config, callbacks);
     engine.reset();
     engine.start();
-    engine.jump(); // give bird initial upward impulse so it doesn't fall before first tap
+    engine.jump();                     // initial flap so bird doesn't freefall on first frame
     engineRef.current = engine;
 
     setUiStatus('playing');

@@ -1,4 +1,4 @@
-import { PlayerState, LeaderboardEntry } from './types';
+import { PlayerState, LeaderboardEntry, PLAYER_STATE } from './types';
 import { LeaderboardService } from './services/LeaderboardService';
 import { RoomService } from './services/RoomService';
 
@@ -37,12 +37,15 @@ export class RoomManager {
     return true;
   }
 
-  removePlayer(roomId: string, playerId: string): void {
+  removePlayer(roomId: string, playerId: string, keepAlive = false): void {
     const room = this.rooms.get(roomId);
     if (room) {
       room.delete(playerId);
       RoomService.incrementPlayerCount(roomId, -1).catch(() => {});
-      if (room.size === 0) this.rooms.delete(roomId);
+      // Only delete the in-memory room when empty AND keepAlive is false.
+      // Persistent sessions (sessionActive) set keepAlive = true so the
+      // room survives between rounds even if temporarily empty.
+      if (room.size === 0 && !keepAlive) this.rooms.delete(roomId);
     }
   }
 
@@ -52,6 +55,7 @@ export class RoomManager {
     const player = this.rooms.get(roomId)?.get(playerId);
     if (!player || !player.alive) return null;
     player.score = score;
+    player.bestScore = Math.max(player.bestScore, score);
     player.lastScoreAt = Date.now();
     RoomService.touchActivity(roomId).catch(() => {});
     return player;
@@ -61,6 +65,7 @@ export class RoomManager {
     const player = this.rooms.get(roomId)?.get(playerId);
     if (!player) return null;
     player.alive = false;
+    player.playerState = PLAYER_STATE.DEAD;
     RoomService.touchActivity(roomId).catch(() => {});
     return player;
   }
@@ -108,7 +113,7 @@ export class RoomManager {
       roomId,
       player.userId,
       player.username,
-      player.score,
+      player.bestScore,
       player.alive
     );
   }
@@ -120,5 +125,55 @@ export class RoomManager {
   async clearRoom(roomId: string): Promise<void> {
     this.rooms.delete(roomId);
     await LeaderboardService.clearRoom(roomId);
+  }
+
+  // ── Persistent-session round reset ──────────────────────
+
+  /**
+   * Reset every player's alive/score state for a new round while keeping the
+   * room and all connections intact. Clears the Redis leaderboard so the next
+   * round starts fresh.
+   */
+  async resetPlayersForNextRound(roomId: string): Promise<void> {
+    const room = this.rooms.get(roomId);
+    if (!room) return;
+    for (const player of room.values()) {
+      player.alive       = true;
+      player.score       = 0;
+      player.bestScore   = 0;
+      player.lastScoreAt = Date.now();
+      player.playerState = PLAYER_STATE.JOINED;
+    }
+    await LeaderboardService.clearRoom(roomId);
+  }
+
+  // ── Batch player-state mutations ─────────────────────────
+
+  /** Set all players' playerState to a given value (e.g. READY on game init). */
+  setAllPlayersState(roomId: string, state: PlayerState['playerState']): void {
+    const room = this.rooms.get(roomId);
+    if (!room) return;
+    for (const p of room.values()) {
+      p.playerState = state;
+    }
+  }
+
+  /** Reset a single player for restart (timer-mode respawn or play-again). */
+  resetPlayerForRestart(roomId: string, playerId: string): PlayerState | null {
+    const player = this.rooms.get(roomId)?.get(playerId);
+    if (!player) return null;
+    player.alive       = true;
+    player.score       = 0;
+    // bestScore intentionally NOT reset — preserves best across timer-mode lives
+    player.lastScoreAt = Date.now();
+    player.playerState = PLAYER_STATE.JOINED;
+    return player;
+  }
+
+  /** Return count of alive players. */
+  getAlivePlayers(roomId: string): PlayerState[] {
+    const room = this.rooms.get(roomId);
+    if (!room) return [];
+    return Array.from(room.values()).filter(p => p.alive);
   }
 }

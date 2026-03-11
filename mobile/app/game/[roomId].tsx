@@ -18,7 +18,7 @@ export default function GameScreen() {
   const clearLobby   = useGameStore((s) => s.clearLobby);
   const gameStarted  = useGameStore((s) => s.gameStarted);
 
-  const { joinRoom, leaveRoom, sendScore, sendGameOver } = useWebSocket();
+  const { joinRoom, leaveRoom, sendScore, sendGameOver, startGame: wsStartGame } = useWebSocket();
 
   // Track last sent score to debounce WS messages (send at most every 250ms)
   const lastSentScore  = useRef(-1);
@@ -57,9 +57,19 @@ export default function GameScreen() {
 
   function handleDismissFinal() {
     setFinal(null);
+    // Stay in the room for the next round — engine will reset to idle.
+    // The server's round_reset event will clear gameStarted + leaderboard.
+    // Host can then start_game which triggers game_started for all players.
+  }
+
+  function handleLeaveRoom() {
     leaveRoom(roomId!);
     router.replace('/(tabs)');
   }
+
+  const handleGameStart = useCallback(() => {
+    if (roomId) wsStartGame(roomId);
+  }, [roomId, wsStartGame]);
 
   return (
     <View style={styles.root}>
@@ -69,6 +79,8 @@ export default function GameScreen() {
           roomId={roomId}
           onScoreChange={handleScoreChange}
           onGameOver={handleGameOver}
+          onGameStart={handleGameStart}
+          gameStarted={gameStarted}
         />
       )}
 
@@ -84,10 +96,7 @@ export default function GameScreen() {
         <SafeAreaView style={styles.topBar} pointerEvents="box-none">
           <TouchableOpacity
             style={styles.leaveBtn}
-            onPress={() => {
-              leaveRoom(roomId!);
-              router.replace('/(tabs)');
-            }}
+            onPress={handleLeaveRoom}
           >
             <Text style={styles.leaveBtnText}>✕ Leave</Text>
           </TouchableOpacity>

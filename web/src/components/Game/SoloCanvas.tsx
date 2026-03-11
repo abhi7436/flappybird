@@ -243,7 +243,7 @@ export const SoloCanvas: React.FC<Props> = ({ width, height, onBackToMenu }) => 
         height={height}
         className="block rounded-2xl shadow-2xl cursor-pointer"
         onPointerDown={(e) => { e.preventDefault(); handleJump(); }}
-        style={{ touchAction: 'none' }}
+        style={{ touchAction: 'manipulation' }}
       />
 
       {/* ── Lightning flash ────────────────────────────────────────────── */}
@@ -284,7 +284,7 @@ export const SoloCanvas: React.FC<Props> = ({ width, height, onBackToMenu }) => 
             initial={{ opacity: 0, scale: 0 }}
             animate={{ opacity: 1, scale: 1, transition: { delay: 0.5 } }}
             exit={{ opacity: 0, scale: 0 }}
-            onClick={(e) => { e.stopPropagation(); dropPoop(); }}
+            onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); dropPoop(); }}
             className="absolute bottom-[calc(12%+52px)] right-3
                        w-11 h-11 rounded-full bg-black/40 border border-white/20
                        text-xl flex items-center justify-center
@@ -388,10 +388,10 @@ export const SoloCanvas: React.FC<Props> = ({ width, height, onBackToMenu }) => 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
+            onPointerDown={(e) => { e.preventDefault(); handleJump(); }}
             className="absolute inset-0 flex flex-col items-center justify-center gap-4
                        bg-black/30 rounded-2xl cursor-pointer"
-            style={{ touchAction: 'none' }}
-            onPointerDown={(e) => { e.preventDefault(); handleJump(); }}
+            style={{ touchAction: 'manipulation' }}
           >
             <motion.p
               animate={{ y: [0, -8, 0] }}
@@ -459,13 +459,13 @@ export const SoloCanvas: React.FC<Props> = ({ width, height, onBackToMenu }) => 
 
             <div className="flex gap-3 mt-1">
               <button
-                onPointerDown={(e) => { e.preventDefault(); resetGame(); startGame(); }}
+                onPointerDown={(e) => { e.preventDefault(); resetGame();  }}
                 className="btn-arcade text-base px-6"
               >
                 🔄 Play Again
               </button>
               <button
-                onClick={onBackToMenu}
+                onPointerDown={(e) => { e.preventDefault(); onBackToMenu(); }}
                 className="btn-secondary px-6 py-2.5 text-base"
               >
                 Menu

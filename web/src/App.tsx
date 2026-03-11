@@ -259,20 +259,19 @@ const AuthScreen: React.FC = () => {
       </form>
 
       {/* Guest separator */}
-      <div className="flex items-center gap-3 w-full max-w-sm">
+      {/* <div className="flex items-center gap-3 w-full max-w-sm">
         <div className="flex-1 h-px bg-white/10" />
         <span className="text-white/30 text-xs">or</span>
         <div className="flex-1 h-px bg-white/10" />
       </div>
 
-      <button
+    {  <button
         onPointerDown={(e) => { e.preventDefault(); playAsGuest(); }}
-        onClick={playAsGuest}
         className="btn-secondary w-full max-w-sm font-semibold"
         style={{ minHeight: 52, fontSize: '1rem', touchAction: 'manipulation' }}
       >
         👤 Play as Guest
-      </button>
+      </button> } */}
     </div>
   );
 };
@@ -535,18 +534,32 @@ const GameScreen: React.FC<{ socket: ReturnType<typeof useWebSocket> }> = ({ soc
     }));
 
   const highScore  = leaderboard[0]?.score ?? 0;
-  const [showBoard, setShowBoard] = useState(true);
+  // Default to hidden on mobile so game canvas is unobstructed
+  const [showBoard, setShowBoard] = useState(false);
 
   const handleDismissFinal = () => {
-    resetGameState(); // clears score, leaderboard, room, finalRanking
-    setScreen('menu');
+    // Reset per-round state but keep the room — go back to lobby
+    // so the host can start a new round with all players.
+    useGameStore.getState().setFinalRanking(null);
+    useGameStore.getState().setScore(0);
+    useGameStore.getState().setIsAlive(true);
+    useGameStore.getState().setCountdown(null);
+    useGameStore.getState().setLeaderboard([]);
+    useGameStore.getState().setTimerRemaining(null);
+    useGameStore.getState().setTimerTotal(null);
+    useGameStore.getState().setIsTimerMode(false);
+    setScreen('lobby');
   };
 
   return (
     <>
-      <div className="flex flex-wrap items-start justify-center gap-2 w-full h-full">
-        <div className="flex flex-col gap-2">
-          <HUD score={score} highScore={highScore} />
+      <div className="absolute inset-0 flex items-center justify-center md:relative md:inset-auto md:items-start w-full h-full">
+        {/* Canvas column — absolute centered fullscreen on mobile */}
+        <div className="flex flex-col items-center gap-1 w-full md:w-auto">
+          {/* HUD — hide on mobile to maximise canvas space */}
+          <div className="hidden md:block">
+            <HUD score={score} highScore={highScore} />
+          </div>
           <GameCanvas
             width={width}
             height={height}
@@ -555,7 +568,8 @@ const GameScreen: React.FC<{ socket: ReturnType<typeof useWebSocket> }> = ({ soc
           />
         </div>
 
-        <div className="flex flex-col gap-2">
+        {/* Sidebar leaderboard — hidden on mobile, shown on md+ */}
+        <div className="hidden md:flex flex-col gap-2 ml-2">
           <button
             onClick={() => setShowBoard((v) => !v)}
             className="btn-secondary text-xs px-3 py-1.5 self-end"
@@ -564,6 +578,35 @@ const GameScreen: React.FC<{ socket: ReturnType<typeof useWebSocket> }> = ({ soc
           </button>
           <Leaderboard visible={showBoard} />
         </div>
+
+        {/* Mobile: floating toggle for leaderboard overlay */}
+        <div className="md:hidden absolute top-2 right-2 z-20">
+          <button
+            onPointerDown={(e) => { e.preventDefault(); setShowBoard((v) => !v); }}
+            className="w-10 h-10 rounded-full bg-black/50 border border-white/20
+                       text-white text-lg flex items-center justify-center backdrop-blur-sm"
+            style={{ touchAction: 'manipulation' }}
+          >
+            🏆
+          </button>
+        </div>
+
+        {/* Mobile: overlay leaderboard */}
+        <AnimatePresence>
+          {showBoard && (
+            <motion.div
+              key="mobile-board"
+              initial={{ opacity: 0, x: 80 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 80 }}
+              className="md:hidden absolute top-14 right-2 z-20 w-56
+                         bg-gray-900/90 border border-white/10 rounded-xl
+                         backdrop-blur-md shadow-2xl overflow-hidden"
+            >
+              <Leaderboard visible />
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* Final ranking modal — appears when the server sends final_ranking */}

@@ -99,6 +99,15 @@ const CountdownOverlay: React.FC<{ n: number }> = ({ n }) => {
   );
 };
 
+// ── Timer duration presets ─────────────────────────────────────
+const TIMER_PRESETS = [
+  { label: '30s',  value: 30  },
+  { label: '1m',   value: 60  },
+  { label: '1m30', value: 90  },
+  { label: '2m',   value: 120 },
+  { label: '3m',   value: 180 },
+];
+
 // ── Main Lobby ────────────────────────────────────────────────
 export const Lobby: React.FC<Props> = ({ socket }) => {
   const {
@@ -126,6 +135,28 @@ export const Lobby: React.FC<Props> = ({ socket }) => {
   const { play } = useSound();
   const [connectError, setConnectError] = useState<string | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Timer mode state (host only) ────────────────────────────
+  const [timerEnabled, setTimerEnabled]   = useState(false);
+  const [timerDuration, setTimerDuration] = useState(60); // seconds
+
+  // ── Listen for timer config broadcasts from host ────────────
+  useEffect(() => {
+    if (!socket) return;
+    const handler = ({ enabled, durationSeconds }: { enabled: boolean; durationSeconds: number }) => {
+      setTimerEnabled(enabled);
+      setTimerDuration(durationSeconds);
+    };
+    socket.on('timer_config_updated', handler);
+    return () => { socket.off('timer_config_updated', handler); };
+  }, [socket]);
+
+  // ── Broadcast timer config when host changes it ─────────────
+  const updateTimerConfig = (enabled: boolean, duration: number) => {
+    if (room && socket) {
+      socket.emit('set_timer_config', { roomId: room.id, enabled, durationSeconds: duration });
+    }
+  };
 
   // ── Play countdown sounds driven by server countdown value ──
   useEffect(() => {
@@ -167,7 +198,12 @@ export const Lobby: React.FC<Props> = ({ socket }) => {
   const handleStart = () => {
     if (!room || isCounting) return;
     play('menuClick');
-    socket?.emit('start_game', { roomId: room.id });
+    socket?.emit('start_game', {
+      roomId: room.id,
+      timerConfig: timerEnabled
+        ? { enabled: true, durationSeconds: timerDuration }
+        : { enabled: false, durationSeconds: 0 },
+    });
   };
 
   // ── Derived ────────────────────────────────────────────────
@@ -216,6 +252,73 @@ export const Lobby: React.FC<Props> = ({ socket }) => {
 
         {/* ── Player list ────────────────────── */}
         <PlayerList players={roomPlayers} hostId={room.hostId} />
+
+        {/* ── Timer mode config (host only) ──── */}
+        {isHost && (
+          <>
+            <div className="h-px bg-white/[0.08]" />
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center justify-between">
+                <span className="text-white/70 text-sm font-semibold flex items-center gap-1.5">
+                  ⏱️ Timer Mode
+                </span>
+                <button
+                  onClick={() => { play('menuClick'); const next = !timerEnabled; setTimerEnabled(next); updateTimerConfig(next, timerDuration); }}
+                  className={`relative w-11 h-6 rounded-full transition-colors duration-200 ${
+                    timerEnabled ? 'bg-green-500' : 'bg-white/15'
+                  }`}
+                >
+                  <span
+                    className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform duration-200 ${
+                      timerEnabled ? 'translate-x-5' : ''
+                    }`}
+                  />
+                </button>
+              </div>
+
+              <AnimatePresence>
+                {timerEnabled && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="flex gap-2 flex-wrap">
+                      {TIMER_PRESETS.map(p => (
+                        <button
+                          key={p.value}
+                          onClick={() => { play('menuClick'); setTimerDuration(p.value); updateTimerConfig(timerEnabled, p.value); }}
+                          className={`px-3 py-1.5 rounded-xl text-sm font-bold transition-all ${
+                            timerDuration === p.value
+                              ? 'bg-gradient-to-r from-yellow-400 to-orange-500 text-black shadow-lg shadow-orange-500/30'
+                              : 'glass text-white/60 hover:text-white'
+                          }`}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-white/35 text-xs mt-2">
+                      Players respawn on death. Highest score when timer ends wins!
+                    </p>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          </>
+        )}
+
+        {/* Non-host: show timer mode indicator when host enables it */}
+        {!isHost && timerEnabled && (
+          <>
+            <div className="h-px bg-white/[0.08]" />
+            <p className="text-white/50 text-sm text-center">
+              ⏱️ Timer Mode · {TIMER_PRESETS.find(p => p.value === timerDuration)?.label ?? `${timerDuration}s`}
+            </p>
+          </>
+        )}
 
         {/* ── Action bar ─────────────────────── */}
         <div className="flex gap-3 pt-1">

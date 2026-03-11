@@ -106,18 +106,20 @@ export class SpawnManager {
   }
 
   // ── Right-edge helpers ────────────────────────────────────
+  // When no entities exist, return 0 (far left) so the cooldown-distance
+  // check always passes and a new entity can spawn at the right edge.
 
   pipeRightEdge  (entities: Array<{ getState(): { x: number } }>): number {
-    return entities.length ? entities[entities.length - 1].getState().x : this.lastPipeX;
+    return entities.length ? entities[entities.length - 1].getState().x : 0;
   }
   powerUpRightEdge(entities: Array<{ getState(): { x: number } }>): number {
-    return entities.length ? entities[entities.length - 1].getState().x : this.lastPowerUpX;
+    return entities.length ? entities[entities.length - 1].getState().x : 0;
   }
   coinRightEdge  (entities: Array<{ getState(): { x: number } }>): number {
-    return entities.length ? entities[entities.length - 1].getState().x : this.lastCoinX;
+    return entities.length ? entities[entities.length - 1].getState().x : 0;
   }
   bugRightEdge   (entities: Array<{ getState(): { x: number } }>): number {
-    return entities.length ? entities[entities.length - 1].getState().x : this.lastBugX;
+    return entities.length ? entities[entities.length - 1].getState().x : 0;
   }
 
   // ── Spawn decisions ───────────────────────────────────────

@@ -28,7 +28,7 @@ import {
   drawWindArrows,
   drawFogOverlay,
 } from '../../game/EntityRenderer';
-import { LiveLeaderboardPanel } from './LiveLeaderboardPanel';
+// LiveLeaderboardPanel removed — replaced by compact inline mini-leaderboard
 
 interface Props {
   width:   number;
@@ -53,11 +53,13 @@ export const GameCanvas: React.FC<Props> = ({ width, height, socket, roomId }) =
   const { play } = useSound();
 
   // ── Live leaderboard + current-player identity ───────────────────
-  const { leaderboard, user, guest, playerPowerUps } = useGameStore((s) => ({
+  const { leaderboard, user, guest, playerPowerUps, timerRemaining, isTimerMode } = useGameStore((s) => ({
     leaderboard:    s.leaderboard,
     user:           s.user,
     guest:          s.guest,
     playerPowerUps: s.playerPowerUps,
+    timerRemaining: s.timerRemaining,
+    isTimerMode:    s.isTimerMode,
   }));
   const currentUserId = user?.id ?? guest?.id ?? null;
   const top3          = leaderboard.slice(0, 3);
@@ -71,7 +73,6 @@ export const GameCanvas: React.FC<Props> = ({ width, height, socket, roomId }) =
   const [tauntText,      setTauntText]      = useState('');
   const timerRafRef      = useRef<number>(0);
   const gameStartTsRef   = useRef<number>(0);
-  const prevOtherTopRef  = useRef<number>(0); // highest rival score
   const coinStreakRndr   = useRef(0);         // shadow ref for rAF loop
   const TAUNTS = ['😜 Passed ya!', '💨 Too slow!', '🐦 Bye bye~', '😤 Outta my way!'];
 
@@ -118,14 +119,10 @@ export const GameCanvas: React.FC<Props> = ({ width, height, socket, roomId }) =
     return () => window.removeEventListener('keydown', onKey);
   }, [handleJump]);
 
-  // ── Multiplayer auto-start ───────────────────────────────────
-  // GameCanvas only mounts when the 'game' screen is active, which happens
-  // immediately after `game_started` fires on all clients. Starting the
-  // engine here ensures every player's local simulation begins in sync.
-  useEffect(() => {
-    if (roomId) startGame();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // intentionally fires once on mount only
+  // ── Multiplayer: do NOT auto-start physics ──────────────────
+  // The player should see "Tap to Start" first, so the bird doesn't
+  // fall before they're ready. startGame() is called from handleJump()
+  // when status === 'waiting'.
 
   // ── Render loop ─────────────────────────────────────────
   // Deps: [width, height] only. All volatile state read from refs
@@ -197,12 +194,12 @@ export const GameCanvas: React.FC<Props> = ({ width, height, socket, roomId }) =
   // ── Keep coinStreakRndr ref in sync (avoids rAF closure stale) ────
   useEffect(() => { coinStreakRndr.current = coinStreak; }, [coinStreak]);
 
-  // ── Taunt bubble when we overtake the current leader ─────────────
+  // ── Taunt bubble on every pipe crossed (score increase) ──
+  const prevScoreRef = useRef(0);
   useEffect(() => {
-    if (status !== 'playing' || top3.length < 2) return;
-    const rivals = top3.filter(e => e.userId !== currentUserId);
-    const topRival = rivals[0]?.score ?? 0;
-    if (score > topRival && score > prevOtherTopRef.current) {
+    if (status !== 'playing') { prevScoreRef.current = 0; return; }
+    if (score > prevScoreRef.current && score > 0) {
+      prevScoreRef.current = score;
       const text = TAUNTS[Math.floor(Math.random() * TAUNTS.length)];
       setTauntText(text);
       setShowTaunt(true);
@@ -210,8 +207,7 @@ export const GameCanvas: React.FC<Props> = ({ width, height, socket, roomId }) =
       const t = setTimeout(() => setShowTaunt(false), 2000);
       return () => clearTimeout(t);
     }
-    prevOtherTopRef.current = topRival;
-  }, [score, top3, status]);  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [score, status]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Screen shake + OOPS! bubble on death ──────────────────────────
   useEffect(() => {
@@ -260,7 +256,7 @@ export const GameCanvas: React.FC<Props> = ({ width, height, socket, roomId }) =
         height={height}
         className="block rounded-2xl shadow-2xl cursor-pointer"
         onPointerDown={(e) => { e.preventDefault(); handleJump(); }}
-        style={{ touchAction: 'none' }}
+        style={{ touchAction: 'manipulation' }}
       />
 
       {/* ── Lightning flash ──────────────────────────────────────────── */}
@@ -326,7 +322,7 @@ export const GameCanvas: React.FC<Props> = ({ width, height, socket, roomId }) =
             initial={{ opacity: 0, scale: 0 }}
             animate={{ opacity: 1, scale: 1, transition: { delay: 0.5 } }}
             exit={{ opacity: 0, scale: 0 }}
-            onClick={(e) => { e.stopPropagation(); dropPoop(); }}
+            onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); dropPoop(); }}
             className="absolute bottom-[calc(12%+52px)] right-3
                        w-11 h-11 rounded-full bg-black/40 border border-white/20
                        text-xl flex items-center justify-center
@@ -355,14 +351,62 @@ export const GameCanvas: React.FC<Props> = ({ width, height, socket, roomId }) =
         )}
       </AnimatePresence>
 
-      {/* ── Live full leaderboard panel (right side) ─────────────── */}
+      {/* ── Compact top-3 mini leaderboard (below score) ──────────── */}
       <AnimatePresence>
         {status === 'playing' && leaderboard.length > 0 && (
-          <LiveLeaderboardPanel
-            currentUserId={currentUserId}
-            leaderboard={leaderboard}
-            playerPowerUps={playerPowerUps}
-          />
+          <motion.div
+            key="mini-lb"
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0, transition: { delay: 0.3 } }}
+            exit={{ opacity: 0, y: -8 }}
+            className="absolute top-[52px] left-1/2 -translate-x-1/2 pointer-events-none
+                       flex gap-1 z-[5]"
+          >
+            {leaderboard.slice(0, 3).map((entry, i) => {
+              const isSelf = entry.userId === currentUserId;
+              return (
+                <div
+                  key={entry.userId}
+                  className={`flex items-center gap-0.5 px-1.5 py-[2px] rounded-full
+                              text-[9px] font-bold backdrop-blur-sm
+                              ${isSelf
+                                ? 'bg-yellow-500/25 text-yellow-200 border border-yellow-400/30'
+                                : i === 0
+                                ? 'bg-amber-500/20 text-amber-200 border border-amber-400/20'
+                                : 'bg-black/35 text-white/65 border border-white/8'}`}
+                >
+                  <span className="leading-none">{i === 0 ? '👑' : `#${i + 1}`}</span>
+                  <span className="truncate max-w-[40px] leading-snug">{entry.username}</span>
+                  <span className="tabular-nums text-[10px] font-black leading-none">{entry.score}</span>
+                </div>
+              );
+            })}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Timer mode: prominent countdown at top ─────────────────── */}
+      <AnimatePresence>
+        {isTimerMode && timerRemaining !== null && (
+          <motion.div
+            key="timer-countdown"
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="absolute top-4 right-4 pointer-events-none z-10"
+          >
+            <div
+              className={`px-4 py-2 rounded-2xl font-black text-xl tabular-nums shadow-lg
+                         ${timerRemaining <= 10
+                           ? 'bg-red-600/80 text-white animate-pulse'
+                           : timerRemaining <= 30
+                           ? 'bg-orange-500/70 text-white'
+                           : 'bg-black/50 text-white/90 backdrop-blur-sm border border-white/10'
+                         }`}
+            >
+              ⏱️ {formatTime(timerRemaining)}
+            </div>
+          </motion.div>
         )}
       </AnimatePresence>
 
@@ -377,10 +421,12 @@ export const GameCanvas: React.FC<Props> = ({ width, height, socket, roomId }) =
             className="absolute bottom-[calc(12%+12px)] left-0 right-0
                        flex justify-center gap-2 pointer-events-none"
           >
-            <div className="counter-pill">
-              <span>🕐</span>
-              <span className="game-timer">{formatTime(displaySeconds)}</span>
-            </div>
+            {!isTimerMode && (
+              <div className="counter-pill">
+                <span>🕐</span>
+                <span className="game-timer">{formatTime(displaySeconds)}</span>
+              </div>
+            )}
             <div className="counter-pill">
               <span>🪙</span>
               <span>{score * 3}</span>
@@ -425,13 +471,15 @@ export const GameCanvas: React.FC<Props> = ({ width, height, socket, roomId }) =
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
+            onPointerDown={(e) => { e.preventDefault(); handleJump(); }}
             className="absolute inset-0 flex flex-col items-center justify-center gap-4
-                       bg-black/30 rounded-2xl"
+                       bg-black/30 rounded-2xl cursor-pointer"
+            style={{ touchAction: 'manipulation' }}
           >
             <motion.p
               animate={{ y: [0, -8, 0] }}
               transition={{ repeat: Infinity, duration: 1.25 }}
-              className="text-white text-2xl font-bold tracking-wide drop-shadow-md"
+              className="text-white text-2xl font-bold tracking-wide drop-shadow-md pointer-events-none"
             >
               Tap / Space to Start 🐦
             </motion.p>
@@ -471,9 +519,26 @@ export const GameCanvas: React.FC<Props> = ({ width, height, socket, roomId }) =
                   <div className="counter-pill">🪙&nbsp;{score * 3} coins</div>
                   <div className="counter-pill">🐛&nbsp;{Math.floor(score / 5)} bugs</div>
                 </div>
-                <p className="text-white/38 text-sm italic animate-pulse">
-                  Watching others play…
-                </p>
+                <div className="flex flex-col items-center gap-2 mt-1">
+                  <button
+                    onPointerDown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      // Tell server this player wants to restart
+                      if (socket && roomId) {
+                        socket.emit('player_restart', { roomId });
+                      }
+                      // Reset local engine so player sees Tap to Start
+                      resetGame();
+                    }}
+                    className="btn-arcade text-base px-6"
+                  >
+                    🔄 Play Again
+                  </button>
+                  <p className="text-white/38 text-sm italic animate-pulse">
+                    Watching others play…
+                  </p>
+                </div>
               </>
             ) : (
               <>

@@ -55,7 +55,9 @@ interface GameStore {
   // ── Game lifecycle ──────────────────────────────────────────
   gameStarted: boolean;
   setGameStarted: (v: boolean) => void;
-
+  // ── Host tracking ────────────────────────────────────────────
+  hostId: string | null;
+  setHostId: (id: string | null) => void;
   // ── Notifications ────────────────────────────────────────────
   pendingInviteRoomId: string | null;
   pendingInviteToken: string | null;
@@ -117,6 +119,9 @@ export const useGameStore = create<GameStore>((set) => ({
 
   gameStarted: false,
   setGameStarted: (v) => set({ gameStarted: v }),
+
+  hostId: null,
+  setHostId: (id) => set({ hostId: id }),
 
   pendingInviteRoomId: null,
   pendingInviteToken: null,

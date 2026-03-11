@@ -19,6 +19,16 @@ export { getDifficultyTier } from './DifficultyManager';
 
 export type GameStatus = 'idle' | 'running' | 'dead';
 
+/** Strict game-state constants (used across engine + UI layers). */
+export const GAME_STATE = {
+  WAITING:   'waiting',
+  RUNNING:   'running',
+  GAME_OVER: 'game_over',
+} as const;
+
+/** Maximum frame delta allowed (ms) — clamps tab-away / resume spikes. */
+const MAX_DELTA_MS = 50;
+
 export interface GameConfig {
   canvasWidth: number;
   canvasHeight: number;
@@ -222,7 +232,8 @@ export class GameEngine {
   tick(timestamp: number): boolean {
     if (this.status !== 'running') return false;
 
-    const deltaMs = this.lastTimestamp ? timestamp - this.lastTimestamp : 16.67;
+    const rawDelta = this.lastTimestamp ? timestamp - this.lastTimestamp : 16.67;
+    const deltaMs   = Math.min(rawDelta, MAX_DELTA_MS);   // clamp first-frame / tab-resume spikes
     this.lastTimestamp = timestamp;
 
     // Expire timed power-up effects

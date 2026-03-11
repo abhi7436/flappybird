@@ -14,7 +14,7 @@ import { Link, useRouter } from 'expo-router';
 import { useGameStore } from '../../src/store/gameStore';
 import { Auth } from '../../src/services/api';
 import { saveToken } from '../../src/services/storage';
-import { loadGuestSession, saveGuestId, guestUsername } from '../../src/services/guestSession';
+import { loadGuestSession, saveGuestId, guestUsername, generateUUID } from '../../src/services/guestSession';
 
 export default function LoginScreen() {
   const router  = useRouter();
@@ -41,18 +41,21 @@ export default function LoginScreen() {
   }
 
   async function handlePlayAsGuest() {
+    let guestId: string;
+    let highScore = 0;
+
     try {
-      const { id: existingId, highScore } = await loadGuestSession();
-      const id = existingId ?? crypto.randomUUID();
-      if (!existingId) await saveGuestId(id);
-      setGuest(id, guestUsername(id), highScore);
-      router.replace('/solo');
+      const session = await loadGuestSession();
+      highScore = session.highScore;
+      guestId = session.id ?? generateUUID();
+      if (!session.id) await saveGuestId(guestId);
     } catch {
-      // fallback — still enter solo mode
-      const id = `guest_${Date.now()}`;
-      setGuest(id, guestUsername(id), 0);
-      router.replace('/solo');
+      // AsyncStorage failed — use an ephemeral ID
+      guestId = `guest_${Date.now()}`;
     }
+
+    setGuest(guestId, guestUsername(guestId), highScore);
+    router.replace('/solo');
   }
 
   return (
