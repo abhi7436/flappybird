@@ -67,10 +67,11 @@ export function useGameEngine(
   canvasWidth  = 400,
   canvasHeight = 600
 ): UseGameEngineReturn {
-  const { setScore, setIsAlive, setFinalScore, setPlayerPowerUp, user, guest } = useGameStore((s) => ({
+  const { setScore, setIsAlive, setFinalScore, setBestScore, setPlayerPowerUp, user, guest } = useGameStore((s) => ({
     setScore:         s.setScore,
     setIsAlive:       s.setIsAlive,
     setFinalScore:    s.setFinalScore,
+    setBestScore:     s.setBestScore,
     setPlayerPowerUp: s.setPlayerPowerUp,
     user:             s.user,
     guest:            s.guest,
@@ -161,6 +162,9 @@ export function useGameEngine(
         scoreRef.current = s;
         setLocalScore(s);
         setScore(s);
+        // Track best score across timer-mode lives
+        const best = useGameStore.getState().bestScore;
+        if (s > best) setBestScore(s);
         broadcastScore(s);
         play('score');
       },
@@ -242,6 +246,27 @@ export function useGameEngine(
     setCoinStreak(0);
     setIsAlive(false);
   }, [setIsAlive]);
+
+  // ── Timer-mode respawn detection ─────────────────────────────
+  // When the server sends player_respawn, the store's isAlive flips to true
+  // while the engine is still in 'dead' state. Detect this and reset the
+  // engine back to 'waiting' so the player sees "Tap to Start".
+  const storeIsAlive = useGameStore((s) => s.isAlive);
+  useEffect(() => {
+    if (storeIsAlive && uiStatus === 'dead') {
+      cancelAnimationFrame(rafRef.current);
+      soundManager.setMusicIntensity(0);
+      engineRef.current        = null;
+      scoreRef.current         = 0;
+      coinStreakRef.current     = 0;
+      musicIntensityRef.current = 0;
+      isDarkModeRef.current     = false;
+      setUiStatus('waiting');
+      setLocalScore(0);
+      setGameState(null);
+      setCoinStreak(0);
+    }
+  }, [storeIsAlive, uiStatus]);
 
   // Cleanup on unmount
   useEffect(() => () => {

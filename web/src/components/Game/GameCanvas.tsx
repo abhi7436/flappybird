@@ -53,13 +53,14 @@ export const GameCanvas: React.FC<Props> = ({ width, height, socket, roomId }) =
   const { play } = useSound();
 
   // ── Live leaderboard + current-player identity ───────────────────
-  const { leaderboard, user, guest, playerPowerUps, timerRemaining, isTimerMode } = useGameStore((s) => ({
+  const { leaderboard, user, guest, playerPowerUps, timerRemaining, isTimerMode, bestScore } = useGameStore((s) => ({
     leaderboard:    s.leaderboard,
     user:           s.user,
     guest:          s.guest,
     playerPowerUps: s.playerPowerUps,
     timerRemaining: s.timerRemaining,
     isTimerMode:    s.isTimerMode,
+    bestScore:      s.bestScore,
   }));
   const currentUserId = user?.id ?? guest?.id ?? null;
   const top3          = leaderboard.slice(0, 3);
@@ -211,7 +212,11 @@ export const GameCanvas: React.FC<Props> = ({ width, height, socket, roomId }) =
 
   // ── Screen shake + OOPS! bubble on death ──────────────────────────
   useEffect(() => {
-    if (status !== 'dead') return;
+    if (status !== 'dead') {
+      setShaking(false);
+      setShowOops(false);
+      return;
+    }
     setShaking(true);
     setShowOops(true);
     const t1 = setTimeout(() => setShaking(false), 460);
@@ -427,6 +432,12 @@ export const GameCanvas: React.FC<Props> = ({ width, height, socket, roomId }) =
                 <span className="game-timer">{formatTime(displaySeconds)}</span>
               </div>
             )}
+            {isTimerMode && bestScore > 0 && (
+              <div className="counter-pill">
+                <span>🏆</span>
+                <span className="font-black">{bestScore}</span>
+              </div>
+            )}
             <div className="counter-pill">
               <span>🪙</span>
               <span>{score * 3}</span>
@@ -512,8 +523,13 @@ export const GameCanvas: React.FC<Props> = ({ width, height, socket, roomId }) =
                 <div className="text-center">
                   <p className="text-white text-3xl font-bold tabular-nums">{score}</p>
                   <p className="text-white/50 text-xs uppercase tracking-widest mt-0.5">
-                    Final Score
+                    Score
                   </p>
+                  {isTimerMode && bestScore > score && (
+                    <p className="text-amber-300 text-sm font-bold mt-1 tabular-nums">
+                      🏆 Best: {bestScore}
+                    </p>
+                  )}
                 </div>
                 <div className="flex gap-2.5">
                   <div className="counter-pill">🪙&nbsp;{score * 3} coins</div>

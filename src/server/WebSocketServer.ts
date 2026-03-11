@@ -338,6 +338,10 @@ export async function initializeWebSocketServer(
         const player = roomManager.markDead(roomId, socket.id);
         if (!player) return;
 
+        // Check timer mode early — controls whether we show final_ranking
+        const roomMeta = await RoomService.getMeta(roomId);
+        const isTimerMode = !!roomMeta?.timerConfig?.enabled;
+
         const leaderboard = await roomManager.getLeaderboard(roomId);
         const rank = leaderboard.findIndex((e) => e.userId === user.userId) + 1;
         const totalPlayers = leaderboard.length;
@@ -367,13 +371,15 @@ export async function initializeWebSocketServer(
         // Store for batch ELO processing when all players are done
         pendingReplays.set(user.userId, replayData ?? ({} as ReplayData));
 
-        // Tell this player their personal final rank
-        socket.emit('final_ranking', {
-          rank:         rank === 0 ? totalPlayers : rank,
-          totalPlayers,
-          finalScore,
-          eloBefore,
-        });
+        // In timer mode, skip final_ranking — death is temporary
+        if (!isTimerMode) {
+          socket.emit('final_ranking', {
+            rank:         rank === 0 ? totalPlayers : rank,
+            totalPlayers,
+            finalScore,
+            eloBefore,
+          });
+        }
 
         // Broadcast to spectators
         io.to(`spectate:${roomId}`).emit('player_dead', {
@@ -382,12 +388,6 @@ export async function initializeWebSocketServer(
           finalScore,
           rank,
         });
-
-        // ── Timer-mode respawn ───────────────────────────────
-        // In timer mode, death is temporary — the player is offered a
-        // respawn (score resets to 0) as long as the timer hasn't expired.
-        const roomMeta = await RoomService.getMeta(roomId);
-        const isTimerMode = !!roomMeta?.timerConfig?.enabled;
 
         if (isTimerMode) {
           // Auto-respawn: reset the player so the client can "Tap to Start" again
@@ -449,6 +449,12 @@ export async function initializeWebSocketServer(
 
         await RoomService.maybeCloseAllDead(roomId, io, total, dead, () => {
           // Called when a persistent session round resets to 'waiting'.
+          // Cancel any pending leaderboard broadcast before clearing Redis.
+          const pendingTimer = pendingBroadcasts.get(roomId);
+          if (pendingTimer) {
+            clearTimeout(pendingTimer);
+            pendingBroadcasts.delete(roomId);
+          }
           // Delay score reset so the synchronous final broadcast above
           // has already been dispatched with the real scores.
           setTimeout(() => {
@@ -798,6 +804,13 @@ function startTimerInterval(
       const meta = await RoomService.getMeta(roomId);
       if (meta?.sessionActive) {
         io.to(roomId).emit('round_ended', { roomId, reason: 'timer_expired' });
+        // Cancel any pending leaderboard broadcast so it doesn't fire after
+        // clearRoom wipes Redis and overwrite clients with empty data.
+        const pendingTimer = pendingBroadcasts.get(roomId);
+        if (pendingTimer) {
+          clearTimeout(pendingTimer);
+          pendingBroadcasts.delete(roomId);
+        }
         // Immediately reset room to 'waiting' so the host can start a new round
         // once they dismiss the final ranking overlay.
         await roomManager.resetPlayersForNextRound(roomId);

@@ -182,7 +182,7 @@ export const FinalRankingOverlay: React.FC<Props> = ({ onDismiss }) => {
               >
                 <div className="flex-1 text-center pr-4">
                   <p className="text-white/35 text-[10px] uppercase tracking-widest mb-0.5 font-semibold">
-                    Final Score
+                    Best Score
                   </p>
                   <p
                     className="score-display text-4xl"

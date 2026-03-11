@@ -37,6 +37,9 @@ interface GameStore {
   setIsAlive: (a: boolean) => void;
   finalScore: number;
   setFinalScore: (s: number) => void;
+  /** Best score across timer-mode lives (reset each round) */
+  bestScore: number;
+  setBestScore: (s: number) => void;
 
   // ── Leaderboard ───────────────────────────────
   leaderboard: LeaderboardEntry[];
@@ -122,6 +125,8 @@ export const useGameStore = create<GameStore>((set) => ({
   setIsAlive: (isAlive) => set({ isAlive }),
   finalScore: 0,
   setFinalScore: (finalScore) => set({ finalScore }),
+  bestScore: 0,
+  setBestScore: (bestScore) => set({ bestScore }),
 
   leaderboard: [],
   setLeaderboard: (leaderboard) => set({ leaderboard }),
@@ -178,6 +183,7 @@ export const useGameStore = create<GameStore>((set) => ({
     score:          0,
     isAlive:        true,
     finalScore:     0,
+    bestScore:      0,
     leaderboard:    [],
     finalRanking:   null,
     room:           null,

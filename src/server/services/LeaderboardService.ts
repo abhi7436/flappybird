@@ -94,11 +94,15 @@ export class LeaderboardService {
     await redisClient.del(metaKey);
   }
 
-  /** Wipe entire room state from Redis */
+  /** Wipe leaderboard data from Redis (preserves room meta). */
   static async clearRoom(roomId: string): Promise<void> {
     const keys_list = await redisClient.keys(`room:${roomId}:*`);
-    if (keys_list.length > 0) {
-      await redisClient.del(keys_list);
+    if (keys_list.length === 0) return;
+    // Keep the room meta key so the room survives between rounds
+    const metaKey = `room:${roomId}:meta`;
+    const toDelete = keys_list.filter((k) => k !== metaKey);
+    if (toDelete.length > 0) {
+      await redisClient.del(toDelete);
     }
   }
 

@@ -147,6 +147,7 @@ export function useWebSocket(): Socket | null {
     socket.on('game_started', ({ startedAt: _t, timerConfig }: { startedAt: number; timerConfig?: { enabled: boolean; durationSeconds: number } | null }) => {
       // Reset per-game state so the canvas boots fresh for every round
       setScore(0);
+      useGameStore.getState().setBestScore(0);
       setIsAlive(true);
       setFinalRanking(null);
       setCountdown(null);
@@ -187,8 +188,15 @@ export function useWebSocket(): Socket | null {
       winner: { userId: string; username: string; score: number } | null;
       leaderboard: LeaderboardEntry[];
     }) => {
-      // Update leaderboard with final data
-      if (finalLb) setLeaderboard(finalLb);
+      // Update leaderboard with final data, normalising alive → isAlive
+      if (finalLb) {
+        const normalized = finalLb.map((e: any) => ({
+          ...e,
+          isAlive:      e.isAlive ?? e.alive ?? true,
+          previousRank: null,
+        }));
+        setLeaderboard(normalized);
+      }
       // Show final ranking for the current user
       const currentUser = useGameStore.getState().user;
       const currentGuest = useGameStore.getState().guest;
@@ -216,8 +224,9 @@ export function useWebSocket(): Socket | null {
 
     // ── player_respawn (timer mode — death is temporary) ───────────
     socket.on('player_respawn', () => {
-      // Reset alive so the GameCanvas death overlay hides
-      // and shows "Tap to Start" for the respawned player.
+      // Reset alive so the game engine detects the transition and
+      // resets to 'waiting' ("Tap to Start") for the respawned player.
+      setFinalRanking(null);
       setIsAlive(true);
       setScore(0);
     });
