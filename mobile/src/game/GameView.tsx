@@ -25,6 +25,7 @@ interface GameViewProps {
 
 const GROUND_H   = 80;
 const SCROLL_SPD = 3;
+const HAPTIC_COOLDOWN_MS = 90;
 
 export default function GameView({
   roomId,
@@ -36,6 +37,8 @@ export default function GameView({
 }: GameViewProps) {
   const { width, height } = useWindowDimensions();
   const groundOffsetRef   = useRef(0);
+  const rafRef            = useRef<number | null>(null);
+  const lastHapticAtRef   = useRef(0);
 
   const canvasWidth  = width;
   const canvasHeight = height;
@@ -80,14 +83,44 @@ export default function GameView({
         return;
       }
       jump();
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+      const now = Date.now();
+      if (now - lastHapticAtRef.current >= HAPTIC_COOLDOWN_MS) {
+        lastHapticAtRef.current = now;
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+      }
     });
 
-  React.useEffect(() => {
-    if (gameState.status === 'running') {
-      groundOffsetRef.current += SCROLL_SPD;
-    }
-  }, [gameState]);
+  useEffect(() => {
+    const wrap = Math.max(canvasWidth, 1);
+    let lastTs = 0;
+
+    const tick = (ts: number) => {
+      if (lastTs === 0) {
+        lastTs = ts;
+      }
+
+      const dt = ts - lastTs;
+      lastTs = ts;
+
+      if (gameState.status === 'running') {
+        // Keep speed consistent even when frame rate drops.
+        const speed = SCROLL_SPD * (dt / 16.67);
+        groundOffsetRef.current = (groundOffsetRef.current + speed) % wrap;
+      }
+
+      rafRef.current = requestAnimationFrame(tick);
+    };
+
+    rafRef.current = requestAnimationFrame(tick);
+
+    return () => {
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+    };
+  }, [gameState.status, canvasWidth]);
 
   return (
     <View style={styles.container}>
