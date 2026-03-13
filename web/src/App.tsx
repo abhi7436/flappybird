@@ -22,6 +22,7 @@ import {
   getGuestHighScore,
   getGuestUsername,
 } from './services/guestSession';
+import { getHomeScreen, isSoloModeEnabled } from './config/appMode';
 
 const CANVAS_W = 400;
 const CANVAS_H = 600;
@@ -487,35 +488,34 @@ const SoloScreen: React.FC = () => {
 
   const handleBackToMenu = () => {
     play('menuClick');
-    if (user) {
-      setScreen('menu');
-    } else {
-      // guest → back to auth
+    if (!user && !isSoloModeEnabled()) {
       setGuest(null);
-      setScreen('auth');
     }
+    setScreen(getHomeScreen(!!user));
   };
 
   return (
-    <div className="flex flex-col items-center gap-2 w-full h-full px-2 pt-2 pb-2">
-      {/* Top bar */}
-      <div className="flex items-center justify-between w-full" style={{ maxWidth: width }}>
+    <div className="relative w-full h-full">
+      <SoloCanvas width={width} height={height} onBackToMenu={handleBackToMenu} />
+
+      {/* Floating top bar — overlays the canvas, fully transparent to game taps */}
+      <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-3 pt-3 pointer-events-none"
+           style={{ paddingTop: 'max(0.75rem, env(safe-area-inset-top))' }}>
         <button
           onClick={handleBackToMenu}
-          className="text-white/40 hover:text-white text-sm transition-colors py-2 pr-4"
+          className="pointer-events-auto text-white/70 hover:text-white text-sm
+                     transition-colors py-2 px-3 bg-black/30 backdrop-blur-sm rounded-xl"
           style={{ touchAction: 'manipulation', minHeight: 44, minWidth: 44 }}
         >
           ← Menu
         </button>
-        <span className="text-white/50 text-xs">
+        <span className="text-white/60 text-xs bg-black/30 backdrop-blur-sm px-2.5 py-1.5 rounded-xl">
           👤 {displayName}
           {soloHighScore > 0 && (
             <>&nbsp;· Best: <span className="text-yellow-300 font-bold">{soloHighScore}</span></>
           )}
         </span>
       </div>
-
-      <SoloCanvas width={width} height={height} onBackToMenu={handleBackToMenu} />
     </div>
   );
 };
@@ -654,6 +654,12 @@ const App: React.FC = () => {
       window.history.replaceState({}, '', '/');
     }
 
+    if (isSoloModeEnabled()) {
+      useGameStore.getState().setScreen(getHomeScreen(false));
+      setIsRestoring(false);
+      return;
+    }
+
     setIsRestoring(true);
     restoreSession().then((authUser) => {
       if (authUser) {
@@ -726,7 +732,7 @@ const App: React.FC = () => {
       >
         <div className="min-h-full w-full max-w-full flex items-center justify-center px-4 py-8">
           <AnimatePresence mode="wait">
-            {screen === 'auth' && (
+            {!isSoloModeEnabled() && screen === 'auth' && (
               <motion.div
                 key="auth"
                 variants={SCREEN_VARIANTS} initial="initial" animate="animate" exit="exit"
@@ -791,7 +797,7 @@ const App: React.FC = () => {
       </AnimatePresence>
 
       {/* Global auth modal — shown when a guest attempts a multiplayer action */}
-      <AuthModal />
+      {!isSoloModeEnabled() && <AuthModal />}
     </div>
   );
 };

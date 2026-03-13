@@ -9,6 +9,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useGameStore } from '../src/store/gameStore';
+import { getHomeRoute } from '../src/config/appMode';
 import { saveGuestHighScore } from '../src/services/guestSession';
 import GameView from '../src/game/GameView';
 
@@ -49,7 +50,7 @@ export default function SoloScreen() {
   };
 
   const handleMenu = () => {
-    router.replace(user ? '/(tabs)' : '/(auth)/login');
+    router.replace(getHomeRoute(user ? 'authenticated' : null));
   };
 
   return (

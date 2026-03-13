@@ -3,6 +3,7 @@ import {
   AuthUser, BirdSkinId, DayPhase, FinalRankingPayload,
   GuestUser, LeaderboardEntry, RoomInfo, RoomPlayer, Screen,
 } from '../types';
+import { getInitialScreen } from '../config/appMode';
 
 interface GameStore {
   // ── Navigation ──────────────────────────────
@@ -97,7 +98,7 @@ interface GameStore {
   resetGameState: () => void;}
 
 export const useGameStore = create<GameStore>((set) => ({
-  screen: 'auth',
+  screen: getInitialScreen(false),
   setScreen: (screen) => set({ screen }),
 
   user: null,

@@ -235,15 +235,15 @@ export const SoloCanvas: React.FC<Props> = ({ width, height, onBackToMenu }) => 
   return (
     <div
       className={`relative select-none${shaking ? ' screen-shake' : ''}`}
-      style={{ width, height, touchAction: 'none' }}
+      style={{ width: '100%', height: '100%', touchAction: 'none' }}
     >
       <canvas
         ref={canvasRef}
         width={width}
         height={height}
-        className="block rounded-2xl shadow-2xl cursor-pointer"
+        className="block cursor-pointer"
         onPointerDown={(e) => { e.preventDefault(); handleJump(); }}
-        style={{ touchAction: 'manipulation' }}
+        style={{ touchAction: 'manipulation', width: '100%', height: '100%' }}
       />
 
       {/* ── Lightning flash ────────────────────────────────────────────── */}
@@ -254,7 +254,7 @@ export const SoloCanvas: React.FC<Props> = ({ width, height, onBackToMenu }) => 
             initial={{ opacity: 0.9 }}
             animate={{ opacity: 0 }}
             transition={{ duration: 0.35 }}
-            className="absolute inset-0 rounded-2xl pointer-events-none"
+            className="absolute inset-0 pointer-events-none"
             style={{ background: 'rgba(230, 240, 255, 0.88)' }}
           />
         )}
@@ -263,7 +263,7 @@ export const SoloCanvas: React.FC<Props> = ({ width, height, onBackToMenu }) => 
       {/* ── Night tint ─────────────────────────────────────────────────── */}
       {gameState?.isNight && (
         <div
-          className="absolute inset-0 rounded-2xl pointer-events-none"
+          className="absolute inset-0 pointer-events-none"
           style={{ background: 'rgba(10, 15, 50, 0.38)' }}
         />
       )}
@@ -271,7 +271,7 @@ export const SoloCanvas: React.FC<Props> = ({ width, height, onBackToMenu }) => 
       {/* ── Dark-mode difficulty tint (tier 1+) ──────────────────────── */}
       {gameState?.isDarkMode && !gameState?.isNight && (
         <div
-          className="absolute inset-0 rounded-2xl pointer-events-none transition-opacity duration-1000"
+          className="absolute inset-0 pointer-events-none transition-opacity duration-1000"
           style={{ background: 'rgba(5, 8, 30, 0.42)' }}
         />
       )}
@@ -390,7 +390,7 @@ export const SoloCanvas: React.FC<Props> = ({ width, height, onBackToMenu }) => 
             exit={{ opacity: 0 }}
             onPointerDown={(e) => { e.preventDefault(); handleJump(); }}
             className="absolute inset-0 flex flex-col items-center justify-center gap-4
-                       bg-black/30 rounded-2xl cursor-pointer"
+                       bg-black/30 cursor-pointer"
             style={{ touchAction: 'manipulation' }}
           >
             <motion.p
@@ -419,7 +419,7 @@ export const SoloCanvas: React.FC<Props> = ({ width, height, onBackToMenu }) => 
             exit={{ opacity: 0 }}
             transition={{ delay: 0.50 }}
             className="absolute inset-0 flex flex-col items-center justify-center gap-4
-                       bg-black/55 rounded-2xl backdrop-blur-sm"
+                       bg-black/55 backdrop-blur-sm"
           >
             <motion.p
               initial={{ scale: 0 }}
@@ -464,12 +464,12 @@ export const SoloCanvas: React.FC<Props> = ({ width, height, onBackToMenu }) => 
               >
                 🔄 Play Again
               </button>
-              <button
+ {/*              <button
                 onPointerDown={(e) => { e.preventDefault(); onBackToMenu(); }}
                 className="btn-secondary px-6 py-2.5 text-base"
               >
                 Menu
-              </button>
+              </button> */}
             </div>
           </motion.div>
         )}

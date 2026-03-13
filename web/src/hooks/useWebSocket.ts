@@ -9,6 +9,7 @@ import {
 } from '../types';
 import { loadToken, clearAuthStorage } from '../services/authStorage';
 import { LeaderboardSync } from '../sync';
+import { getAuthFailureScreen } from '../config/appMode';
 
 type RoomJoinedPayload  = { roomId: string; playerId: string; hostId: string };
 type PlayerJoinedPayload = { playerId: string; userId: string; username: string };
@@ -105,7 +106,7 @@ export function useWebSocket(): Socket | null {
         console.warn('[WS] auth error — redirecting to login:', err.message);
         clearAuthStorage();
         setUser(null);
-        setScreen('auth');
+        setScreen(getAuthFailureScreen());
         socket.disconnect();
       } else {
         console.warn('[WS] connect_error:', err.message);

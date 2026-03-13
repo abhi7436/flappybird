@@ -27,6 +27,7 @@ import {
   loadUser,
   clearAuthStorage,
 } from '../services/authStorage';
+import { getLogoutScreen } from '../config/appMode';
 
 interface AuthResponse {
   token: string;
@@ -118,7 +119,7 @@ export function useAuth() {
     }).catch(() => {});
     clearAuthStorage();
     setUser(null);
-    setScreen('auth');
+    setScreen(getLogoutScreen());
   }, [user, setUser, setScreen]);
 
   // ── restoreSession ────────────────────────────────────────

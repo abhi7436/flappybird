@@ -10,6 +10,7 @@
  */
 import { useCallback } from 'react';
 import { useGameStore } from '../store/gameStore';
+import { isSoloModeEnabled } from '../config/appMode';
 
 export function useAuthGuard() {
   const user         = useGameStore((s) => s.user);
@@ -19,6 +20,8 @@ export function useAuthGuard() {
     (fn: () => void) => {
       if (user) {
         fn();
+      } else if (isSoloModeEnabled()) {
+        return;
       } else {
         openAuthModal(fn);
       }

@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useGameStore } from '../../src/store/gameStore';
+import { getLogoutRoute } from '../../src/config/appMode';
 import { Rooms } from '../../src/services/api';
 import { clearToken } from '../../src/services/storage';
 
@@ -63,7 +64,7 @@ export default function LobbyScreen() {
   async function handleLogout() {
     await clearToken();
     clearAuth();
-    router.replace('/(auth)/login');
+    router.replace(getLogoutRoute());
   }
 
   return (
