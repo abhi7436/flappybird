@@ -181,6 +181,28 @@ Add your domain to `CORS_ORIGIN` (comma-separated, no trailing slash):
 CORS_ORIGIN=https://play.yourdomain.com,https://yourdomain.com
 ```
 
+### Render returns HTML / 405 for `/api/*` and UI shows `Unexpected token '<'`
+
+If Web and API are separate Render services, relative URLs like `/api/auth/login`
+will hit the Web service (Nginx/static) instead of the API service.
+
+Set these environment variables on the **Web** service and redeploy:
+
+```bash
+VITE_API_URL=https://<your-api-service>.onrender.com
+VITE_WS_URL=wss://<your-api-service>.onrender.com
+```
+
+Also set this on the **API** service:
+
+```bash
+CORS_ORIGIN=https://<your-web-service>.onrender.com
+FRONTEND_URL=https://<your-web-service>.onrender.com
+```
+
+Use HTTPS URLs in production. Browsers show request payloads in DevTools by design,
+but traffic is encrypted in transit when the request URL is `https://`.
+
 ---
 
 ## Updating

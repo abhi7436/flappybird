@@ -5,7 +5,8 @@ import {
   TournamentRecord, TournamentDetail, ReplayRecord,
 } from '../../../src/server/types/index';
 
-const BASE = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3001';
+const RAW_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3001';
+const BASE = RAW_BASE.replace(/\/+$/, '');
 
 // ── HTTP helpers ──────────────────────────────────────────────
 
@@ -24,14 +25,31 @@ async function req<T>(
     if (token) headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const res = await fetch(`${BASE}${path}`, {
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+
+  const res = await fetch(`${BASE}${normalizedPath}`, {
     method,
     headers,
     body: body ? JSON.stringify(body) : undefined,
   });
 
-  const json = await res.json();
-  if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
+  const contentType = (res.headers.get('content-type') ?? '').toLowerCase();
+  const text = await res.text();
+  const isJson = contentType.includes('application/json');
+
+  if (!isJson) {
+    const snippet = text.replace(/\s+/g, ' ').trim().slice(0, 120);
+    throw new Error(`Expected JSON, got ${contentType || 'non-JSON'} (HTTP ${res.status}). ${snippet}`);
+  }
+
+  let json: any;
+  try {
+    json = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(`Server returned invalid JSON (HTTP ${res.status})`);
+  }
+
+  if (!res.ok) throw new Error(json?.error ?? json?.message ?? `HTTP ${res.status}`);
   return json as T;
 }
 

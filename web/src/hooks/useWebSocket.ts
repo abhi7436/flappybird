@@ -9,6 +9,7 @@ import {
 } from '../types';
 import { loadToken, clearAuthStorage } from '../services/authStorage';
 import { LeaderboardSync } from '../sync';
+import { websocketUrl } from '../services/http';
 
 type RoomJoinedPayload  = { roomId: string; playerId: string; hostId: string };
 type PlayerJoinedPayload = { playerId: string; userId: string; username: string };
@@ -16,7 +17,7 @@ type PlayerLeftPayload   = { userId: string };
 type RoomClosedPayload   = { reason: string };
 type ErrorPayload        = { message: string; code?: string };
 
-const WS_URL = import.meta.env.VITE_WS_URL ?? '';
+const WS_URL = websocketUrl();
 
 export function useWebSocket(): Socket | null {
   const socketRef = useRef<Socket | null>(null);

@@ -27,6 +27,7 @@ import {
   loadUser,
   clearAuthStorage,
 } from '../services/authStorage';
+import { apiErrorMessage, apiUrl, parseJsonResponse } from '../services/http';
 
 interface AuthResponse {
   token: string;
@@ -73,14 +74,14 @@ export function useAuth() {
   // ── login ─────────────────────────────────────────────────
   const login = useCallback(
     async (email: string, password: string): Promise<AuthUser> => {
-      const res = await fetch('/api/auth/login', {
+      const res = await fetch(apiUrl('/api/auth/login'), {
         method:      'POST',
         headers:     { 'Content-Type': 'application/json' },
         credentials: 'include', // send/receive HTTP-only cookie
         body:        JSON.stringify({ email, password }),
       });
-      const data: AuthResponse = await res.json();
-      if (!res.ok) throw new Error((data as any).error ?? 'Login failed');
+      const data = await parseJsonResponse<AuthResponse>(res);
+      if (!res.ok) throw new Error(apiErrorMessage(data, 'Login failed'));
       const authUser = toAuthUser(data);
       _persist(authUser);
       return authUser;
@@ -91,14 +92,14 @@ export function useAuth() {
   // ── register ──────────────────────────────────────────────
   const register = useCallback(
     async (username: string, email: string, password: string): Promise<AuthUser> => {
-      const res = await fetch('/api/auth/register', {
+      const res = await fetch(apiUrl('/api/auth/register'), {
         method:      'POST',
         headers:     { 'Content-Type': 'application/json' },
         credentials: 'include',
         body:        JSON.stringify({ username, email, password }),
       });
-      const data: AuthResponse = await res.json();
-      if (!res.ok) throw new Error((data as any).error ?? 'Registration failed');
+      const data = await parseJsonResponse<AuthResponse>(res);
+      if (!res.ok) throw new Error(apiErrorMessage(data, 'Registration failed'));
       const authUser = toAuthUser(data);
       _persist(authUser);
       return authUser;
@@ -110,7 +111,7 @@ export function useAuth() {
   const logout = useCallback(async () => {
     const userId = user?.id;
     // Fire-and-forget — clears the HTTP-only cookie server-side
-    fetch('/api/auth/logout', {
+    fetch(apiUrl('/api/auth/logout'), {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
@@ -152,7 +153,7 @@ export function useAuth() {
       const headers: HeadersInit = {};
       if (storedToken) headers['Authorization'] = `Bearer ${storedToken}`;
 
-      const res = await fetch('/api/auth/me', {
+      const res = await fetch(apiUrl('/api/auth/me'), {
         credentials: 'include', // send cookie if present
         headers,
       });
@@ -164,7 +165,7 @@ export function useAuth() {
         return null;
       }
 
-      const data: AuthResponse = await res.json();
+      const data = await parseJsonResponse<AuthResponse>(res);
       // /me may return the same token or a refreshed one
       const effectiveToken = data.token ?? storedToken ?? '';
       const authUser = toAuthUser({ ...data, token: effectiveToken });

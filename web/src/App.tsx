@@ -22,6 +22,7 @@ import {
   getGuestHighScore,
   getGuestUsername,
 } from './services/guestSession';
+import { apiErrorMessage, apiUrl, parseJsonResponse } from './services/http';
 
 const CANVAS_W = 400;
 const CANVAS_H = 600;
@@ -297,14 +298,14 @@ const MenuScreen: React.FC = () => {
   const createRoom = async () => {
     play('menuClick');
     try {
-      const res  = await fetch('/api/rooms', {
+      const res  = await fetch(apiUrl('/api/rooms'), {
         method:      'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${user!.token}` },
         body:    JSON.stringify({ maxPlayers: 50 }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message);
+      const data = await parseJsonResponse<{ roomId: string; message?: string; error?: string }>(res);
+      if (!res.ok) throw new Error(apiErrorMessage(data, 'Failed to create room'));
       // Lobby's useEffect will emit join_room → server fires room_joined → sets room in store
       setPendingJoinRoomId(data.roomId);
       setScreen('lobby');

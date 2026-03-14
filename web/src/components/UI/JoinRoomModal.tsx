@@ -6,6 +6,7 @@ import React, { useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useGameStore } from '../../store/gameStore';
 import { useSound } from '../../hooks/useSound';
+import { apiErrorMessage, apiUrl, parseJsonResponse } from '../../services/http';
 
 interface Props {
   open:     boolean;
@@ -31,11 +32,11 @@ export const JoinRoomModal: React.FC<Props> = ({ open, onClose, onJoined }) => {
     play('menuClick');
 
     try {
-      const res  = await fetch(`/api/rooms/${id}`, {
+      const res  = await fetch(apiUrl(`/api/rooms/${id}`), {
         headers: { Authorization: `Bearer ${user!.token}` },
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? data.message ?? 'Room not found or closed');
+      const data = await parseJsonResponse<{ id?: string; error?: string; message?: string }>(res);
+      if (!res.ok) throw new Error(apiErrorMessage(data, 'Room not found or closed'));
       onJoined(data.id ?? id);
     } catch (err: unknown) {
       setError((err as Error).message);

@@ -34,6 +34,7 @@ import {
 } from '../../game/EntityRenderer';
 import { getDifficultyTier } from '@engine/GameEngine';
 import { saveGuestHighScore } from '../../services/guestSession';
+import { apiUrl } from '../../services/http';
 
 interface Props {
   width:       number;
@@ -97,7 +98,7 @@ export const SoloCanvas: React.FC<Props> = ({ width, height, onBackToMenu }) => 
 
       // Sync to server for authenticated users (fire-and-forget)
       if (user && score > 0) {
-        fetch('/api/profile/me/solo-score', {
+        fetch(apiUrl('/api/profile/me/solo-score'), {
           method:      'POST',
           credentials: 'include',
           headers:     {
@@ -106,7 +107,6 @@ export const SoloCanvas: React.FC<Props> = ({ width, height, onBackToMenu }) => 
           },
           body: JSON.stringify({ score }),
         })
-          .then((r) => r.json())
           .then(() => {
             if (score > (user.highScore ?? 0)) {
               useGameStore.getState().setUser({ ...user, highScore: score });

@@ -12,7 +12,7 @@ import {
   SafeAreaView,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Friends as FriendsAPI, Rooms, Invites } from '../../src/services/api';
+import { Friends as FriendsAPI, Rooms, Invites, Profile } from '../../src/services/api';
 import { useGameStore } from '../../src/store/gameStore';
 import type { Friend } from '../../src/types';
 
@@ -50,9 +50,7 @@ export default function FriendsScreen() {
     setAdding(true);
     try {
       // We need userId — fetch public profile first to get it
-      const { profile } = await fetch(
-        `${process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3001'}/api/profile/${name}`
-      ).then((r) => r.json());
+      const { profile } = await Profile.public(name);
       await FriendsAPI.sendRequest((profile as any).id);
       Alert.alert('Request sent!', `Friend request sent to ${name}.`);
       setAddUsername('');
