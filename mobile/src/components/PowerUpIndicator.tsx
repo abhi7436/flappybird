@@ -22,6 +22,9 @@ function EffectBadge({ effect, nowMs }: EffectBadgeProps) {
   const barAnim   = useRef(new Animated.Value(1)).current;
   const permanent = effect.expiresAt === 0;
   const total     = permanent ? 0 : effect.expiresAt - nowMs;
+  const remaining = permanent ? Number.POSITIVE_INFINITY : Math.max(0, effect.expiresAt - nowMs);
+  const isExpiringSoon = effect.type === 'shield' && !permanent && remaining <= 2_000;
+  const blinkOn = !isExpiringSoon || Math.floor(nowMs / 140) % 2 === 0;
 
   useEffect(() => {
     if (permanent) return;
@@ -39,8 +42,12 @@ function EffectBadge({ effect, nowMs }: EffectBadgeProps) {
   });
 
   return (
-    <View style={[styles.badge, { borderColor: meta.color }]}>
-      <Text style={styles.icon}>{meta.icon}</Text>
+    <View style={[
+      styles.badge,
+      { borderColor: meta.color },
+      isExpiringSoon && !blinkOn ? styles.badgeBlinkOff : styles.badgeBlinkOn,
+    ]}>
+      <Text style={[styles.icon, isExpiringSoon && styles.iconWarning]}>{meta.icon}</Text>
       {!permanent && (
         <View style={styles.barBg}>
           <Animated.View style={[styles.barFill, { width: barWidth, backgroundColor: meta.color }]} />
@@ -83,9 +90,21 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.55)',
     minWidth: 42,
   },
+  badgeBlinkOn: {
+    opacity: 1,
+    transform: [{ scale: 1.04 }],
+  },
+  badgeBlinkOff: {
+    opacity: 0.45,
+    transform: [{ scale: 0.96 }],
+  },
   icon: {
     fontSize: 18,
     lineHeight: 22,
+  },
+  iconWarning: {
+    textShadowColor: 'rgba(79,195,247,0.9)',
+    textShadowRadius: 8,
   },
   barBg: {
     width: '100%',

@@ -47,6 +47,14 @@ export class Bird {
     this.state.rotation = Math.min(90, Math.max(-30, this.state.velocity * 3));
   }
 
+  clampToTop(minY = 0): void {
+    if (this.state.y >= minY) return;
+
+    this.state.y = minY;
+    if (this.state.velocity < 0) this.state.velocity = 0;
+    this.state.rotation = Math.max(this.state.rotation, -15);
+  }
+
   jump(): void {
     this.state.velocity = this.jumpStrength;
   }

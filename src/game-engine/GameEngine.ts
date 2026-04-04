@@ -28,6 +28,8 @@ export const GAME_STATE = {
 
 /** Maximum frame delta allowed (ms) — clamps tab-away / resume spikes. */
 const MAX_DELTA_MS = 50;
+const SHIELD_REWARD_COIN_COUNT = 20;
+const MAGNET_FRONT_REACH_PX = 10;
 
 export interface GameConfig {
   canvasWidth: number;
@@ -128,6 +130,8 @@ export class GameEngine {
   private seed:           number;
   private recorder:       ReplayRecorder;
   private gameStartMs:    number;
+  private coinsSinceShield: number;
+  private slowMotionTargetPipe: Pipe | null;
   readonly engineVersion  = ENGINE_VERSION;
 
   constructor(config: GameConfig, callbacks: GameEngineCallbacks = {}) {
@@ -178,6 +182,8 @@ export class GameEngine {
     this.difficultyTier = 0;
     this.lastTimestamp  = 0;
     this.gameStartMs    = 0;
+    this.coinsSinceShield = 0;
+    this.slowMotionTargetPipe = null;
   }
 
   // ── Control ───────────────────────────────────────────────
@@ -220,6 +226,8 @@ export class GameEngine {
     this.difficultyTier = 0;
     this.lastTimestamp  = 0;
     this.gameStartMs    = 0;
+    this.coinsSinceShield = 0;
+    this.slowMotionTargetPipe = null;
     this.recorder.reset();
   }
 
@@ -240,6 +248,7 @@ export class GameEngine {
     const expired = this.powerUpManager.tick(timestamp);
     for (const type of expired) {
       if (type === 'turbo_jump') this.bird.setJumpStrength(Bird.DEFAULT_JUMP_STRENGTH);
+      if (type === 'slow_motion') this.slowMotionTargetPipe = null;
     }
 
     const diff      = DifficultyManager.getSettings(this.difficultyTier);
@@ -254,7 +263,28 @@ export class GameEngine {
 
     // Random events: returns wind delta to apply per-frame
     const windVy = this.eventManager.tick(timestamp, this.score, diff.windEventBoost);
-    if (windVy !== 0) this.bird.addVerticalVelocity(windVy);
+    if (windVy !== 0) {
+      this.bird.addVerticalVelocity(windVy);
+    }
+
+    // Ceiling handling: if the bird touches the top and no shield is active,
+    // the game ends. If shield is active, pin the bird to the top instead.
+    const birdTop = this.bird.getBounds().top;
+    if (birdTop <= 0) {
+      if (this.powerUpManager.isActive('shield')) {
+        this.bird.clampToTop();
+      } else {
+        this.status = 'dead';
+        const nowMs  = performance?.now?.() ?? Date.now();
+        const replay = this.recorder.finish(
+          nowMs, this.score,
+          this.config.canvasWidth, this.config.canvasHeight, this.seed
+        );
+        this.callbacks.onGameOver?.(this.score);
+        this.callbacks.onReplayReady?.(replay);
+        return false;
+      }
+    }
 
     this.maybeSpawnPipe(diff, speed);
     for (const pipe of this.pipes) pipe.update(deltaMs, timestamp);
@@ -268,15 +298,28 @@ export class GameEngine {
     for (const c of this.coins) c.update(deltaMs);
     for (const b of this.bugs)  b.update(deltaMs);
 
-    // Magnet: attract nearby coins to bird
+    // Magnet: attract nearby coins to bird and auto-collect once they reach the bird's body.
     if (this.powerUpManager.isActive('magnet')) {
       const { cx, cy } = this.bird.getCircleHitbox();
+      const birdBounds = this.bird.getBounds();
       for (const c of this.coins) {
         const s   = c.getState();
         const dx  = cx - (s.x + s.width  / 2);
         const dy  = cy - (s.y + s.height / 2);
         const dist = Math.sqrt(dx * dx + dy * dy);
         if (dist < 140) c.attractTo(cx, cy, deltaMs);
+
+        const coinBounds = c.getBounds();
+        const overlapsBirdLane =
+          coinBounds.bottom >= birdBounds.top - s.height &&
+          coinBounds.top <= birdBounds.bottom + s.height;
+        const reachedBirdBody =
+          coinBounds.right >= birdBounds.left - s.width &&
+          coinBounds.left <= birdBounds.right + MAGNET_FRONT_REACH_PX;
+
+        if (overlapsBirdLane && reachedBirdBody) {
+          this.collectCoin(c, timestamp);
+        }
       }
     }
 
@@ -335,7 +378,7 @@ export class GameEngine {
       if (pu.getState().collected) continue;
       if (Collision.birdHitsPowerUp(this.bird, pu)) {
         pu.collect();
-        this.powerUpManager.activate(pu.getState().type, timestamp);
+        this.activateEffect(pu.getState().type, timestamp);
         this.callbacks.onPowerUpCollected?.(pu.getState().type);
       }
     }
@@ -346,10 +389,7 @@ export class GameEngine {
       const cs = c.getState();
       const fakePu = { getBounds: () => c.getBounds(), getState: () => cs } as any;
       if (Collision.birdHitsPowerUp(this.bird, fakePu)) {
-        c.collect();
-        const scoreGain = cs.type === 'golden' ? 3 : 1;
-        if (cs.type === 'golden') this.powerUpManager.activate('golden_coin', timestamp);
-        this.callbacks.onCoinCollected?.(cs.type, scoreGain);
+        this.collectCoin(c, timestamp);
       }
     }
 
@@ -366,6 +406,8 @@ export class GameEngine {
         this.callbacks.onBugCollected?.();
       }
     }
+
+    this.maybeResolveSlowMotionAfterCross(diff);
 
     // Cleanup off-screen entities — release coins and bugs back to their pools
     const liveCoins: Coin[] = [];
@@ -385,11 +427,10 @@ export class GameEngine {
     this.pipes    = this.pipes.filter((p) => !p.isOffScreen());
     this.powerUps = this.powerUps.filter((p) => !p.isOffScreen() && !p.getState().collected);
 
-    // Pipe collision — shield absorbs one hit
+    // Pipe collision — timed shield keeps the bird alive while active
     if (Collision.check(this.bird, this.pipes, this.config.canvasHeight)) {
       if (this.powerUpManager.isActive('shield')) {
-        this.powerUpManager.consume('shield'); // consumed
-        this.bird.jump();                      // bounce away
+        this.bird.jump();
       } else {
         this.status = 'dead';
         const nowMs  = performance?.now?.() ?? Date.now();
@@ -453,9 +494,9 @@ export class GameEngine {
 
   // ── Pipe spawning ─────────────────────────────────────────────────────────
 
-  private maybeSpawnPipe(diff: DifficultySettings, speed: number): void {
+  private maybeSpawnPipe(diff: DifficultySettings, speed: number, force = false): void {
     const rightEdge = this.spawnManager.pipeRightEdge(this.pipes);
-    const d = this.spawnManager.checkPipe(rightEdge);
+    const d = force ? { spawn: true } : this.spawnManager.checkPipe(rightEdge);
     if (!d.spawn) return;
 
     const margin   = 60;
@@ -489,6 +530,66 @@ export class GameEngine {
       type:  d.type,
       speed: pipeSpeed * 0.9,
     }));
+  }
+
+  private activateEffect(type: PowerUpType, timestamp: number): void {
+    this.powerUpManager.activate(type, timestamp);
+
+    if (type === 'slow_motion') {
+      this.slowMotionTargetPipe = this.findUpcomingPipe();
+    }
+  }
+
+  private collectCoin(coin: Coin, timestamp: number): void {
+    if (coin.getState().collected) return;
+
+    coin.collect();
+    const coinState = coin.getState();
+    const scoreGain = coinState.type === 'golden' ? 3 : 1;
+    if (coinState.type === 'golden') this.activateEffect('golden_coin', timestamp);
+
+    this.coinsSinceShield += 1;
+    if (this.coinsSinceShield >= SHIELD_REWARD_COIN_COUNT) {
+      this.coinsSinceShield -= SHIELD_REWARD_COIN_COUNT;
+      this.activateEffect('shield', timestamp);
+      this.callbacks.onPowerUpCollected?.('shield');
+    }
+
+    this.callbacks.onCoinCollected?.(coinState.type, scoreGain);
+  }
+
+  private findUpcomingPipe(): Pipe | null {
+    const birdLeft = this.bird.getBounds().left;
+    return this.pipes.find((pipe) => {
+      const state = pipe.getState();
+      return !state.scored && state.x + state.width >= birdLeft;
+    }) ?? null;
+  }
+
+  private maybeResolveSlowMotionAfterCross(diff: DifficultySettings): void {
+    if (!this.powerUpManager.isActive('slow_motion')) {
+      this.slowMotionTargetPipe = null;
+      return;
+    }
+
+    if (!this.slowMotionTargetPipe) {
+      this.slowMotionTargetPipe = this.findUpcomingPipe();
+      return;
+    }
+
+    const targetState = this.slowMotionTargetPipe.getState();
+    if (!targetState.scored && targetState.x + targetState.width >= this.bird.getBounds().left) {
+      return;
+    }
+
+    this.powerUpManager.consume('slow_motion');
+    this.slowMotionTargetPipe = null;
+
+    const hasUpcomingPipe = this.findUpcomingPipe() !== null;
+    if (!hasUpcomingPipe) {
+      const resumedSpeed = diff.pipeSpeed * this.powerUpManager.getSpeedMultiplier();
+      this.maybeSpawnPipe(diff, resumedSpeed, true);
+    }
   }
 
   // ── Snapshot ─────────────────────────────────────────────

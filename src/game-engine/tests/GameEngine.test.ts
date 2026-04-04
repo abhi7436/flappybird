@@ -1,4 +1,5 @@
 import { GameEngine } from '../GameEngine';
+import { Coin } from '../Coin';
 
 const defaultConfig = { canvasWidth: 800, canvasHeight: 600 };
 
@@ -49,5 +50,61 @@ describe('GameEngine', () => {
     const engine = new GameEngine(defaultConfig);
     engine.start();
     expect(engine.getState().difficultyTier).toBe(0);
+  });
+
+  it('dies when touching the top without an active shield', () => {
+    const engine = new GameEngine(defaultConfig);
+    engine.start();
+
+    (engine as any).bird.reset(200, 1);
+    engine.jump();
+
+    // Should end the game because no shield is active
+    expect(engine.tick(16)).toBe(false);
+    expect(engine.getStatus()).toBe('dead');
+  });
+
+  it('keeps the bird pinned to the top edge while shield is active', () => {
+    const engine = new GameEngine(defaultConfig);
+    engine.start();
+
+    (engine as any).bird.reset(200, 1);
+    // Activate shield so ceiling contact pins instead of killing
+    (engine as any).powerUpManager.activate('shield', 0);
+    engine.jump();
+
+    expect(engine.tick(16)).toBe(true);
+    expect(engine.getStatus()).toBe('running');
+    expect(engine.getState().bird.y).toBe(0);
+  });
+
+  it('magnet collects coins behind the bird and slightly in front of it', () => {
+    const onCoinCollected = jest.fn();
+    const engine = new GameEngine(defaultConfig, { onCoinCollected });
+    engine.start();
+
+    const bird = engine.getState().bird;
+    (engine as any).coins = [
+      new Coin({ x: bird.x - 8, y: bird.y + 2, type: 'normal', speed: 0 }),
+      new Coin({ x: bird.x + bird.width + 6, y: bird.y + 2, type: 'normal', speed: 0 }),
+    ];
+    (engine as any).powerUpManager.activate('magnet', 0);
+
+    engine.tick(16);
+
+    expect(onCoinCollected).toHaveBeenCalledTimes(2);
+    expect(engine.getState().coins).toHaveLength(0);
+  });
+
+  it('keeps magnet active for seven seconds', () => {
+    const engine = new GameEngine(defaultConfig);
+    engine.start();
+    (engine as any).powerUpManager.activate('magnet', 100);
+
+    engine.tick(7_099);
+    expect(engine.isEffectActive('magnet')).toBe(true);
+
+    engine.tick(7_100);
+    expect(engine.isEffectActive('magnet')).toBe(false);
   });
 });

@@ -122,12 +122,21 @@ interface BirdSpriteProps {
   bird:    BirdState;
   skinId?: string;
   shielded?: boolean;
+  shieldExpiring?: boolean;
 }
-export function BirdSprite({ bird, skinId = 'classic', shielded = false }: BirdSpriteProps) {
+export function BirdSprite({
+  bird,
+  skinId = 'classic',
+  shielded = false,
+  shieldExpiring = false,
+}: BirdSpriteProps) {
   const { x, y, width, height, rotation } = bird;
   const cx    = x + width  / 2;
   const cy    = y + height / 2;
   const skin  = SKINS[skinId] ?? SKINS.classic;
+  const blinkOn = !shieldExpiring || Math.floor(Date.now() / 120) % 2 === 0;
+  const shieldOpacity = shieldExpiring ? (blinkOn ? 0.48 : 0.16) : 0.35;
+  const shieldRadius = width * (shieldExpiring ? 0.98 : 0.85);
 
   const m = Skia.Matrix();
   m.translate(cx, cy);
@@ -138,7 +147,12 @@ export function BirdSprite({ bird, skinId = 'classic', shielded = false }: BirdS
     <Group matrix={m}>
       {/* Shield glow ring */}
       {shielded && (
-        <Circle cx={cx} cy={cy} r={width * 0.85} color="rgba(79,195,247,0.35)" />
+        <>
+          <Circle cx={cx} cy={cy} r={shieldRadius} color={`rgba(79,195,247,${shieldOpacity})`} />
+          {shieldExpiring && blinkOn && (
+            <Circle cx={cx} cy={cy} r={width * 1.08} color="rgba(79,195,247,0.18)" />
+          )}
+        </>
       )}
       {/* Body */}
       <RoundedRect x={x} y={y} width={width} height={height} r={height / 2} color={skin.body} />

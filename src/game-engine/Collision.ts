@@ -96,8 +96,8 @@ export class Collision {
     const aabb   = bird.getBounds();
     const circle = bird.getCircleHitbox();
 
-    // Floor / ceiling — use full AABB; sprite mustn't leave canvas at all
-    if (aabb.top <= 0 || aabb.bottom >= canvasHeight) return true;
+    // Floor remains fatal. The ceiling is clamped by Bird/GameEngine before collision checks.
+    if (aabb.top < 0 || aabb.bottom >= canvasHeight) return true;
 
     const prevCircle = prevBird ? prevBird.getCircleHitbox() : circle;
 

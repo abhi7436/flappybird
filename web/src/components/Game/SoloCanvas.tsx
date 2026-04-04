@@ -197,7 +197,11 @@ export const SoloCanvas: React.FC<Props> = ({ width, height, onBackToMenu }) => 
 
   // ── Screen shake + OOPS! on death ──────────────────────────────────
   useEffect(() => {
-    if (status !== 'dead') return;
+    if (status !== 'dead') {
+      setShaking(false);
+      setShowOops(false);
+      return;
+    }
     setShaking(true);
     setShowOops(true);
     const t1 = setTimeout(() => setShaking(false), 460);

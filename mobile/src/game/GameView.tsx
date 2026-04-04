@@ -50,6 +50,11 @@ export default function GameView({
     onGameOver,
   });
 
+  const shieldEffect = gameState.activeEffects.find((effect) => effect.type === 'shield');
+  const shieldExpiringSoon = !!shieldEffect
+    && shieldEffect.expiresAt > 0
+    && shieldEffect.expiresAt - Date.now() <= 2_000;
+
   // Auto-reset engine when round resets, auto-start when server signals game_started
   // Only applies in multiplayer (onGameStart is defined); solo mode manages its own lifecycle.
   useEffect(() => {
@@ -152,6 +157,7 @@ export default function GameView({
             bird={gameState.bird}
             skinId={skinId}
             shielded={(gameState as any).hasShield ?? false}
+            shieldExpiring={shieldExpiringSoon}
           />
 
           <Ground

@@ -37,4 +37,14 @@ describe('Bird', () => {
     expect(bird.getState().y).toBe(100);
     expect(bird.getState().velocity).toBe(0);
   });
+
+  it('clamps at the top edge without leaving the screen', () => {
+    const bird = new Bird({ x: 50, y: 2 });
+    bird.jump();
+    bird.update(16.67);
+    bird.clampToTop();
+
+    expect(bird.getState().y).toBe(0);
+    expect(bird.getState().velocity).toBe(0);
+  });
 });
