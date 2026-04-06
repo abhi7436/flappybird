@@ -44,6 +44,7 @@ const POWERUP_COLORS: Record<string, { bg: string; icon: string }> = {
   shield:       { bg: '#4fc3f7', icon: '🛡️' },
   slow_pipes:   { bg: '#aed581', icon: '🐢' },
   double_score: { bg: '#ffb74d', icon: '×2' },
+  magnet:       { bg: '#90caf9', icon: '🧲' },
 };
 
 const PIPE_COLOR   = '#5d8a3c';
@@ -95,19 +96,23 @@ interface PipeProps {
 }
 export function Pipe({ pipe, canvasHeight }: PipeProps) {
   const { x, width, gapY, gapHeight } = pipe;
-  const topH    = gapY;
+  const topBodyH = Math.max(0, gapY - PIPE_CAP_H);
   const bottomY = gapY + gapHeight;
-  const bottomH = canvasHeight - bottomY - GROUND_H;
+  const bottomBodyH = Math.max(0, (canvasHeight - GROUND_H) - (bottomY + PIPE_CAP_H));
 
   return (
     <Group>
-      <Rect x={x} y={0} width={width} height={topH} color={PIPE_COLOR} />
+      {topBodyH > 0 && (
+        <Rect x={x} y={0} width={width} height={topBodyH} color={PIPE_COLOR} />
+      )}
       <RoundedRect
-        x={x - 4} y={topH - PIPE_CAP_H}
+        x={x - 4} y={Math.max(0, topBodyH - PIPE_CAP_H)}
         width={width + 8} height={PIPE_CAP_H}
         r={4} color="#4a7030"
       />
-      <Rect x={x} y={bottomY} width={width} height={bottomH} color={PIPE_COLOR} />
+      {bottomBodyH > 0 && (
+        <Rect x={x} y={bottomY + PIPE_CAP_H} width={width} height={bottomBodyH} color={PIPE_COLOR} />
+      )}
       <RoundedRect
         x={x - 4} y={bottomY}
         width={width + 8} height={PIPE_CAP_H}

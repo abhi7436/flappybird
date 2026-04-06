@@ -10,6 +10,7 @@ const EFFECT_META: Record<string, { icon: string; color: string; label: string }
   shield:       { icon: '🛡️', color: '#4fc3f7', label: 'Shield'  },
   slow_pipes:   { icon: '🐢', color: '#aed581', label: 'Slow'    },
   double_score: { icon: '×2', color: '#ffb74d', label: 'Double'  },
+  magnet:       { icon: '🧲', color: '#90caf9', label: 'Magnet'  },
 };
 
 interface EffectBadgeProps {

@@ -1,16 +1,30 @@
-import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, Animated } from 'react-native';
 import type { GameStatus } from '@engine/GameEngine';
 
 interface HUDProps {
   score: number;
   status: GameStatus;
   difficultyTier: number;
+  showCrossing?: boolean;
 }
 
 const TIER_LABELS = ['', 'Speed++', 'Maniac', 'Chaos', 'Nightmare'];
 
-export default function HUD({ score, status, difficultyTier }: HUDProps) {
+export default function HUD({ score, status, difficultyTier, showCrossing = false }: HUDProps) {
+  const scale = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (showCrossing) {
+      Animated.sequence([
+        Animated.timing(scale, { toValue: 1.15, duration: 160, useNativeDriver: true }),
+        Animated.timing(scale, { toValue: 1.0, duration: 120, useNativeDriver: true }),
+      ]).start();
+    } else {
+      Animated.timing(scale, { toValue: 0, duration: 180, useNativeDriver: true }).start();
+    }
+  }, [showCrossing, scale]);
+
   return (
     <View style={styles.overlay} pointerEvents="none">
       {/* Score */}
@@ -42,6 +56,11 @@ export default function HUD({ score, status, difficultyTier }: HUDProps) {
           <Text style={styles.subPrompt}>Tap to try again</Text>
         </View>
       )}
+
+      {/* Crossing coin icon */}
+      <Animated.View style={[styles.crossingIcon, { transform: [{ scale }] }] } pointerEvents="none">
+        <Text style={styles.coin}>⭐</Text>
+      </Animated.View>
     </View>
   );
 }
@@ -96,5 +115,22 @@ const styles = StyleSheet.create({
     marginTop: 6,
     fontSize: 16,
     color: 'rgba(255,255,255,0.8)',
+  },
+  crossingIcon: {
+    position: 'absolute',
+    top: '35%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 64,
+    height: 64,
+    borderRadius: 34,
+    backgroundColor: 'rgba(255,215,0,0.06)',
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+  },
+  coin: {
+    fontSize: 32,
+    textAlign: 'center',
   },
 });

@@ -165,9 +165,12 @@ export function drawPipe(
   gradient.addColorStop(1,   darken(color, 20));
 
   ctx.fillStyle = gradient;
-  ctx.beginPath();
-  ctx.roundRect(x, 0, width, gapY - capH, [0, 0, 4, 4]);
-  ctx.fill();
+  const topBodyH = gapY - capH;
+  if (topBodyH > 0) {
+    ctx.beginPath();
+    ctx.roundRect(x, 0, width, topBodyH, [0, 0, 4, 4]);
+    ctx.fill();
+  }
 
   ctx.fillStyle = capColor;
   ctx.beginPath();
@@ -178,9 +181,12 @@ export function drawPipe(
   const bottomY = gapY + gapHeight;
 
   ctx.fillStyle = gradient;
-  ctx.beginPath();
-  ctx.roundRect(x, bottomY + capH, width, canvasHeight - bottomY - capH, [4, 4, 0, 0]);
-  ctx.fill();
+  const bottomBodyH = canvasHeight - bottomY - capH;
+  if (bottomBodyH > 0) {
+    ctx.beginPath();
+    ctx.roundRect(x, bottomY + capH, width, bottomBodyH, [4, 4, 0, 0]);
+    ctx.fill();
+  }
 
   ctx.fillStyle = capColor;
   ctx.beginPath();

@@ -94,21 +94,19 @@ export class Bird {
   /**
    * Tight circular hitbox centred on the bird's body mass.
    *
-   * The visual sprite is 34×24 px.  The body core is roughly an oval
-   * occupying the middle 55% of width and 68% of height, so we use
-   * ~34% of the HEIGHT as the radius (≈ 8 px at default size).
-   * This intentionally ignores the beak sticking out to the right and
-   * the tail feathers sticking out to the left — only the torso kills you.
+   * The visual sprite is ~34×24 px. The body core is narrower than the
+   * sprite to avoid beak/tip collisions — we bias the circle slightly
+   * rearwards and reduce the radius for a tighter, more forgiving hitbox.
    *
-   *   cx  = left edge + 45% of width   (slightly forward of centre)
+   *   cx  = left edge + 40% of width   (slightly rear of previous centre)
    *   cy  = top  edge + 50% of height
-   *   r   = height × 0.34
+   *   r   = height × 0.30
    */
   getCircleHitbox(): { cx: number; cy: number; r: number } {
     return {
-      cx: this.state.x + this.state.width  * 0.45,
-      cy: this.state.y + this.state.height * 0.50,
-      r:  this.state.height * 0.34,
+      cx: this.state.x + this.state.width  * 0.30,
+      cy: this.state.y + this.state.height * 0.20,
+      r:  this.state.height * 0.20,
     };
   }
 

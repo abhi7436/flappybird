@@ -10,6 +10,7 @@ import {
   SafeAreaView,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import PowerUpHelpModal from '../../src/components/PowerUpHelpModal';
 import { useGameStore } from '../../src/store/gameStore';
 import { getLogoutRoute } from '../../src/config/appMode';
 import { Rooms } from '../../src/services/api';
@@ -26,6 +27,7 @@ export default function LobbyScreen() {
   const [joinCode, setJoinCode] = useState('');
   const [creating, setCreating] = useState(false);
   const [joining,  setJoining]  = useState(false);
+  const [helpVisible, setHelpVisible] = useState(false);
 
   async function handleCreate() {
     setCreating(true);
@@ -68,7 +70,8 @@ export default function LobbyScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.root}>
+    <>
+      <SafeAreaView style={styles.root}>
       <View style={styles.header}>
         <View>
           <Text style={styles.greeting}>Welcome back,</Text>
@@ -76,6 +79,9 @@ export default function LobbyScreen() {
         </View>
         <View style={styles.headerRight}>
           <Text style={styles.highScore}>🏆 {user?.high_score ?? 0}</Text>
+          <TouchableOpacity onPress={() => setHelpVisible(true)} style={styles.helpBtn}>
+            <Text style={styles.helpText}>Power-ups</Text>
+          </TouchableOpacity>
           <TouchableOpacity onPress={handleLogout} style={styles.logoutBtn}>
             <Text style={styles.logoutText}>Log out</Text>
           </TouchableOpacity>
@@ -149,7 +155,9 @@ export default function LobbyScreen() {
           </TouchableOpacity>
         </View>
       </View>
-    </SafeAreaView>
+      </SafeAreaView>
+      <PowerUpHelpModal visible={helpVisible} onClose={() => setHelpVisible(false)} />
+    </>
   );
 }
 
@@ -170,6 +178,8 @@ const styles = StyleSheet.create({
   highScore: { color: '#fff', fontWeight: '700', fontSize: 14 },
   logoutBtn: { padding: 4 },
   logoutText: { color: 'rgba(255,255,255,0.35)', fontSize: 12 },
+  helpBtn: { padding: 6, backgroundColor: 'rgba(247,197,159,0.08)', borderRadius: 8 },
+  helpText: { color: '#f7c59f', fontSize: 12, fontWeight: '700' },
   inviteBanner: {
     margin: 16,
     backgroundColor: 'rgba(247,197,159,0.15)',

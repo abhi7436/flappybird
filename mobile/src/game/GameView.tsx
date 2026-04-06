@@ -50,6 +50,11 @@ export default function GameView({
     onGameOver,
   });
 
+  // Show crossing icon when bird horizontally overlaps a pipe
+  const birdX = gameState.bird.x;
+  const birdW = gameState.bird.width;
+  const showCrossing = (gameState.pipes || []).some((p: any) => (p.x <= birdX + birdW && (p.x + p.width) >= birdX));
+
   const shieldEffect = gameState.activeEffects.find((effect) => effect.type === 'shield');
   const shieldExpiringSoon = !!shieldEffect
     && shieldEffect.expiresAt > 0
@@ -173,6 +178,7 @@ export default function GameView({
         score={gameState.score}
         status={gameState.status}
         difficultyTier={gameState.difficultyTier}
+        showCrossing={showCrossing}
       />
       <PowerUpIndicator effects={(gameState as any).activeEffects ?? []} />
     </View>
